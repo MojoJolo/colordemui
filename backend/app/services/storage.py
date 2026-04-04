@@ -21,8 +21,13 @@ def job_metadata_path(job_id: str) -> Path:
 
 
 def ref_image_path(job_id: str) -> Path:
-    """Path for the reference image used in img2img jobs."""
+    """Path for the reference image used in img2img jobs (legacy single-image)."""
     return JOBS_DIR / f"ref_{job_id}.png"
+
+
+def ref_image_path_for_image(image_id: str) -> Path:
+    """Path for a per-image reference file in img2img jobs."""
+    return JOBS_DIR / f"ref_img_{image_id}.png"
 
 
 def save_job(job: JobRecord) -> None:

@@ -60,28 +60,35 @@ def _find_image(image_id: str):
 def create_job(
     prompts: List[str],
     model_name: str = "recraft-v3-svg",
-    image_data: Optional[str] = None,
+    image_data: Optional[List[str]] = None,
 ) -> JobRecord:
     job_id = str(uuid.uuid4())
 
-    # Save reference image for img2img jobs
     has_ref_image = False
     if image_data:
-        raw = image_data.split("base64,")[-1]  # strip data URI prefix if present
-        image_bytes = normalize_image(base64.b64decode(raw))  # convert HEIC + scale
-        ref_path = storage.ref_image_path(job_id)
-        ref_path.parent.mkdir(parents=True, exist_ok=True)
-        ref_path.write_bytes(image_bytes)
         has_ref_image = True
+        # Multiple images: one ImageRecord per image, save each reference separately
+        images = []
+        for data_uri in image_data:
+            image_id = str(uuid.uuid4())
+            raw = data_uri.split("base64,")[-1]
+            img_bytes = normalize_image(base64.b64decode(raw))
+            ref_path = storage.ref_image_path_for_image(image_id)
+            ref_path.parent.mkdir(parents=True, exist_ok=True)
+            ref_path.write_bytes(img_bytes)
+            images.append(
+                ImageRecord(image_id=image_id, prompt="image", created_at=utcnow(), model=model_name)
+            )
+    else:
+        images = [
+            ImageRecord(image_id=str(uuid.uuid4()), prompt=p, created_at=utcnow(), model=model_name)
+            for p in prompts
+        ]
 
-    images = [
-        ImageRecord(image_id=str(uuid.uuid4()), prompt=p, created_at=utcnow(), model=model_name)
-        for p in prompts
-    ]
     job = JobRecord(
         job_id=job_id,
         created_at=utcnow(),
-        total=len(prompts),
+        total=len(images),
         images=images,
         model=model_name,
         has_ref_image=has_ref_image,
@@ -101,18 +108,20 @@ async def run_job(job_id: str) -> None:
 
     model = model_registry.get_model(job.model)
 
-    # Load reference image once for the whole job
-    ref_image_bytes: Optional[bytes] = None
-    if job.has_ref_image:
-        ref_path = storage.ref_image_path(job_id)
-        if ref_path.exists():
-            ref_image_bytes = ref_path.read_bytes()
-
     loop = asyncio.get_running_loop()
 
     for image in job.images:
         image.status = ImageStatus.running
         storage.save_job(job)
+
+        # Load per-image reference file (multi-image) or legacy job-level file
+        ref_image_bytes: Optional[bytes] = None
+        if job.has_ref_image:
+            per_img_path = storage.ref_image_path_for_image(image.image_id)
+            legacy_path = storage.ref_image_path(job_id)
+            ref_path = per_img_path if per_img_path.exists() else legacy_path
+            if ref_path.exists():
+                ref_image_bytes = ref_path.read_bytes()
 
         try:
             image_bytes: bytes = await loop.run_in_executor(

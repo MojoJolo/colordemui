@@ -13,7 +13,7 @@ export async function getAllImages() {
 
 // Start a new generation job
 // model: "recraft-v3-svg" | "flux-dev"
-// imageData: base64 data URI (required for flux-dev)
+// imageData: array of base64 data URIs (required for flux-dev)
 export async function createJob(prompts, model = "recraft-v3-svg", imageData = null) {
   return handleResponse(
     await fetch("/jobs", {

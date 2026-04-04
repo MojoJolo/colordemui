@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN}
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+      CHOKIDAR_USEPOLLING: "true"
+    depends_on:
+      - backend
+    ports:
+      - "5174:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+
+volumes:
+  frontend_node_modules:

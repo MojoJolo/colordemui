@@ -64,7 +64,7 @@ async def create_job(request: CreateJobRequest, background_tasks: BackgroundTask
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    if model.accepts_image and not request.image_data:
+    if model.accepts_image and (not request.image_data or len(request.image_data) == 0):
         raise HTTPException(
             status_code=400,
             detail=f"Model '{request.model}' requires an image input.",

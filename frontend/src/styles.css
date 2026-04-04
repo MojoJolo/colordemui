@@ -197,11 +197,41 @@ body {
   color: #c3c9d4;
 }
 
+.upload-preview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+}
+
 .upload-preview {
   display: flex;
   align-items: center;
   gap: 0.875rem;
-  padding: 0.625rem 0.875rem;
+  padding: 0.375rem 0.625rem;
+  background: #f9fafb;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+
+.upload-add-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  border: 2px dashed #d1d5db;
+  color: #9ca3af;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.upload-add-more:hover {
+  border-color: #6366f1;
+  color: #6366f1;
 }
 
 .upload-preview img {

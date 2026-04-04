@@ -6,7 +6,7 @@ from app.models import ImageStatus, JobStatus
 class CreateJobRequest(BaseModel):
     prompts: List[str]
     model: str = "recraft-v3-svg"
-    image_data: Optional[str] = None  # base64 data URI, required for img2img models
+    image_data: Optional[List[str]] = None  # list of base64 data URIs, required for img2img models
 
 
 class SelectRequest(BaseModel):

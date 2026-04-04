@@ -25,14 +25,21 @@ STYLE_SUFFIX = (
     "very simple background context, "
     "background elements smaller than the main subject, "
     "balanced composition, "
-    "clean white background"
+    "clean white background, "
+    "strictly black and white only, "
+    "use only pure black rgb(0,0,0) #000000 for outlines, "
+    "use only pure white rgb(255,255,255) #ffffff for backgrounds and fill areas, "
+    "no gray tones, no near-black colors, no colored fills, "
+    "two-color palette black and white only"
 )
 
 NEGATIVE_PROMPT = (
     "filled shapes, solid black areas, silhouettes, "
     "shading, gradients, photorealistic, 3d, complex background, "
     "tiny details, intricate patterns, dense textures, "
-    "book, open book, page border, frame, border"
+    "book, open book, page border, frame, border, "
+    "gray, grey, dark gray, near-black, colored fills, "
+    "rgb(0,0,1), rgb(254,254,254), off-black, off-white"
 )
 
 

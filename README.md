@@ -53,6 +53,30 @@ Open **http://localhost:5173** in your browser.
 
 ---
 
+## Docker Compose
+
+Create a `.env` file in the repo root or export the variable in your shell:
+
+```bash
+export REPLICATE_API_TOKEN=your_token_here
+```
+
+Then start the app from the repo root:
+
+```bash
+docker compose up --build
+```
+
+Services:
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8000`
+
+The compose setup mounts both source trees for live reload and keeps frontend
+dependencies in a named Docker volume.
+
+---
+
 ## How it works
 
 1. Paste one prompt per line in the textarea and click **Generate Images**.

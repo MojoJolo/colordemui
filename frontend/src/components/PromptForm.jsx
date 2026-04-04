@@ -63,26 +63,29 @@ function isHeic(file) {
 export default function PromptForm({ onGenerate, isGenerating }) {
   const [text, setText] = useState("");
   const [model, setModel] = useState("recraft-v3-svg");
-  const [refImage, setRefImage] = useState(null); // { dataUrl, w, h, label }
+  const [refImages, setRefImages] = useState([]); // [{ dataUrl, w, h, label }]
   const [uploadError, setUploadError] = useState(null);
   const fileInputRef = useRef(null);
 
   const selectedModel = MODELS.find((m) => m.id === model);
   const lineCount = text.split("\n").filter((l) => l.trim()).length;
 
-  async function handleImageFile(file) {
-    if (!file) return;
+  async function handleImageFiles(files) {
+    if (!files || files.length === 0) return;
     setUploadError(null);
     try {
-      if (isHeic(file)) {
-        // HEIC: browsers can't render it — send raw to backend for conversion
-        const dataUrl = await readFileAsDataUrl(file);
-        setRefImage({ dataUrl, w: null, h: null, label: file.name });
-      } else {
-        // All other formats: scale in browser to keep upload small
-        const result = await scaleViaCanvas(file);
-        setRefImage({ ...result, label: `${result.w} × ${result.h}px` });
-      }
+      const results = await Promise.all(
+        Array.from(files).map(async (file) => {
+          if (isHeic(file)) {
+            const dataUrl = await readFileAsDataUrl(file);
+            return { dataUrl, w: null, h: null, label: file.name };
+          } else {
+            const result = await scaleViaCanvas(file);
+            return { ...result, label: `${result.w} × ${result.h}px` };
+          }
+        })
+      );
+      setRefImages((prev) => [...prev, ...results]);
     } catch (e) {
       console.error("Image load failed:", e);
       setUploadError("Could not load image. Please try another file.");
@@ -91,16 +94,16 @@ export default function PromptForm({ onGenerate, isGenerating }) {
 
   function handleDrop(e) {
     e.preventDefault();
-    handleImageFile(e.dataTransfer.files[0]);
+    handleImageFiles(e.dataTransfer.files);
   }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (selectedModel.acceptsImage) {
-      if (!refImage) return;
-      const dataUrl = refImage.dataUrl;
-      setRefImage(null);
-      onGenerate(["image"], model, dataUrl);
+      if (refImages.length === 0) return;
+      const dataUrls = refImages.map((img) => img.dataUrl);
+      setRefImages([]);
+      onGenerate(refImages.map(() => "image"), model, dataUrls);
     } else {
       const prompts = text.split("\n").map((l) => l.trim()).filter(Boolean);
       if (prompts.length === 0) return;
@@ -124,7 +127,7 @@ export default function PromptForm({ onGenerate, isGenerating }) {
               checked={model === m.id}
               onChange={() => {
                 setModel(m.id);
-                if (!m.acceptsImage) setRefImage(null);
+                if (!m.acceptsImage) setRefImages([]);
               }}
               disabled={isGenerating}
             />
@@ -138,7 +141,7 @@ export default function PromptForm({ onGenerate, isGenerating }) {
       {selectedModel.acceptsImage && (
         <>
           <div
-            className={`image-upload-zone ${refImage ? "has-image" : ""}`}
+            className={`image-upload-zone ${refImages.length > 0 ? "has-image" : ""}`}
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
             onClick={() => !isGenerating && fileInputRef.current?.click()}
@@ -147,36 +150,49 @@ export default function PromptForm({ onGenerate, isGenerating }) {
               ref={fileInputRef}
               type="file"
               accept="image/*,.heic,.heif"
+              multiple
               style={{ display: "none" }}
-              onChange={(e) => handleImageFile(e.target.files[0])}
+              onChange={(e) => { handleImageFiles(e.target.files); e.target.value = ""; }}
               disabled={isGenerating}
             />
-            {refImage ? (
-              <div className="upload-preview">
-                {/* HEIC has no browser-renderable preview */}
-                {refImage.w ? (
-                  <img src={refImage.dataUrl} alt="Reference" />
-                ) : (
-                  <div className="upload-heic-thumb">HEIC</div>
+            {refImages.length > 0 ? (
+              <div className="upload-preview-grid">
+                {refImages.map((img, i) => (
+                  <div key={i} className="upload-preview">
+                    {img.w ? (
+                      <img src={img.dataUrl} alt="Reference" />
+                    ) : (
+                      <div className="upload-heic-thumb">HEIC</div>
+                    )}
+                    <div className="upload-preview-info">
+                      <span>{img.label}</span>
+                      {!isGenerating && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRefImages((prev) => prev.filter((_, j) => j !== i));
+                          }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {!isGenerating && (
+                  <div className="upload-add-more">
+                    <span className="upload-icon">+</span>
+                    <span>Add more</span>
+                  </div>
                 )}
-                <div className="upload-preview-info">
-                  <span>{refImage.label}</span>
-                  {!isGenerating && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={(e) => { e.stopPropagation(); setRefImage(null); }}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
               </div>
             ) : (
               <div className="upload-empty">
                 <span className="upload-icon">↑</span>
-                <span>Drop an image or click to upload</span>
-                <span className="upload-hint">JPEG, PNG, HEIC supported</span>
+                <span>Drop images or click to upload</span>
+                <span className="upload-hint">JPEG, PNG, HEIC supported — multiple allowed</span>
               </div>
             )}
           </div>
@@ -210,7 +226,7 @@ export default function PromptForm({ onGenerate, isGenerating }) {
         className="btn btn-primary"
         disabled={
           isGenerating ||
-          (selectedModel.acceptsImage ? !refImage : lineCount === 0)
+          (selectedModel.acceptsImage ? refImages.length === 0 : lineCount === 0)
         }
       >
         {isGenerating ? "Generating…" : "Generate Images"}
