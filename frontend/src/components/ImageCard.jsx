@@ -98,6 +98,17 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
           >
             {copied ? "✓" : "⎘"}
           </button>
+          {isDone && image.filename?.endsWith(".mp4") && (
+            <a
+              href={url}
+              download={image.filename}
+              className="btn btn-icon btn-copy"
+              title="Download video"
+              aria-label="Download video"
+            >
+              ↓
+            </a>
+          )}
           <button
             type="button"
             className="btn btn-icon btn-delete"
