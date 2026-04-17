@@ -1,6 +1,6 @@
 import ImageCard from "./ImageCard";
 
-export default function ImageGrid({ images, onSelect, onDelete }) {
+export default function ImageGrid({ images, onSelect, onDelete, onExpand }) {
   if (!images || images.length === 0) return null;
 
   return (
@@ -11,6 +11,7 @@ export default function ImageGrid({ images, onSelect, onDelete }) {
           image={img}
           onSelect={(selected) => onSelect(img.image_id, selected)}
           onDelete={() => onDelete(img.image_id)}
+          onExpand={onExpand}
         />
       ))}
     </div>

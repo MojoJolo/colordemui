@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import * as api from "./api";
+import FluxKleinForm from "./components/FluxKleinForm";
+import ZImageTurboForm from "./components/ZImageTurboForm";
+import PVideoForm from "./components/PVideoForm";
+import PImageLoraForm from "./components/PImageLoraForm";
 import ImageGrid from "./components/ImageGrid";
 import ProgressPanel from "./components/ProgressPanel";
 import PromptForm from "./components/PromptForm";
@@ -14,6 +18,9 @@ export default function App() {
   const [activeJob, setActiveJob] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState(null);
+  const [activePage, setActivePage] = useState("home");
+  const [expandedImage, setExpandedImage] = useState(null);
+  const [loraTriggerWord, setLoraTriggerWord] = useState("");
   const pollRef = useRef(null);
 
   // Load all previously generated images when the page opens
@@ -21,6 +28,15 @@ export default function App() {
     api.getAllImages()
       .then(setImages)
       .catch((err) => console.error("Failed to load images:", err));
+  }, []);
+
+  // Close lightbox on Escape
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === "Escape") setExpandedImage(null);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
   // Merge incoming job images into the global images list.
@@ -64,11 +80,11 @@ export default function App() {
   // Handlers
   // -------------------------------------------------------------------------
 
-  async function handleGenerate(prompts, model, imageData) {
+  async function handleGenerate(prompts, model, imageData, options = {}) {
     setError(null);
     setIsGenerating(true);
     try {
-      const job = await api.createJob(prompts, model, imageData);
+      const job = await api.createJob(prompts, model, imageData, options);
       setActiveJob({ job_id: job.job_id, status: job.status, total: job.total, completed: job.completed });
       mergeJobImages(job.images);
     } catch (err) {
@@ -128,6 +144,10 @@ export default function App() {
     window.open(api.getPdfUrl(), "_blank");
   }
 
+  function handleDownloadLoraZip() {
+    window.open(api.getLoraZipUrl(loraTriggerWord), "_blank");
+  }
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -139,14 +159,69 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Coloring Book Generator</h1>
-        <p className="subtitle">
-          Generate SVG line-art images from text prompts via Replicate
-        </p>
+        <div className="app-header-top">
+          <div>
+            <h1>Coloring Book Generator</h1>
+            <p className="subtitle">
+              Generate images via Replicate
+            </p>
+          </div>
+        </div>
+        <nav className="page-tabs">
+          <button
+            className={`tab${activePage === "home" ? " active" : ""}`}
+            onClick={() => setActivePage("home")}
+            type="button"
+          >
+            Coloring Book
+          </button>
+          <button
+            className={`tab${activePage === "flux-klein" ? " active" : ""}`}
+            onClick={() => setActivePage("flux-klein")}
+            type="button"
+          >
+            Flux Klein 9B
+          </button>
+          <button
+            className={`tab${activePage === "z-turbo" ? " active" : ""}`}
+            onClick={() => setActivePage("z-turbo")}
+            type="button"
+          >
+            Z Image Turbo
+          </button>
+          <button
+            className={`tab${activePage === "p-video" ? " active" : ""}`}
+            onClick={() => setActivePage("p-video")}
+            type="button"
+          >
+            P-Video
+          </button>
+          <button
+            className={`tab${activePage === "p-image-lora" ? " active" : ""}`}
+            onClick={() => setActivePage("p-image-lora")}
+            type="button"
+          >
+            P-Image LoRA
+          </button>
+        </nav>
       </header>
 
       <main className="app-main">
-        <PromptForm onGenerate={handleGenerate} isGenerating={isGenerating} />
+        {activePage === "home" && (
+          <PromptForm onGenerate={handleGenerate} isGenerating={isGenerating} />
+        )}
+        {activePage === "flux-klein" && (
+          <FluxKleinForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
+        )}
+        {activePage === "z-turbo" && (
+          <ZImageTurboForm onGenerate={handleGenerate} isGenerating={isGenerating} />
+        )}
+        {activePage === "p-video" && (
+          <PVideoForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
+        )}
+        {activePage === "p-image-lora" && (
+          <PImageLoraForm onGenerate={handleGenerate} isGenerating={isGenerating} />
+        )}
 
         {error && <div className="error-banner">{error}</div>}
 
@@ -161,15 +236,38 @@ export default function App() {
               onUnselectAll={handleUnselectAll}
               onDeleteSelected={handleDeleteSelected}
               onDownloadPdf={handleDownloadPdf}
+              triggerWord={loraTriggerWord}
+              onTriggerWordChange={setLoraTriggerWord}
+              onDownloadLoraZip={handleDownloadLoraZip}
             />
             <ImageGrid
               images={images}
               onSelect={handleSelectImage}
               onDelete={handleDeleteImage}
+              onExpand={setExpandedImage}
             />
           </>
         )}
       </main>
+
+      {expandedImage && (
+        <div className="lightbox-backdrop" onClick={() => setExpandedImage(null)}>
+          <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+            {expandedImage.filename?.endsWith(".mp4") ? (
+              <video src={expandedImage.url} controls autoPlay loop />
+            ) : (
+              <img src={expandedImage.url} alt={expandedImage.prompt} />
+            )}
+            <button
+              className="lightbox-close"
+              onClick={() => setExpandedImage(null)}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,10 +1,20 @@
-export default function ImageCard({ image, onSelect, onDelete }) {
+import { useState } from "react";
+
+export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
   const { status, url, prompt, selected, error } = image;
+  const [copied, setCopied] = useState(false);
 
   const isDone = status === "done";
   const isFailed = status === "failed";
   const isRunning = status === "running";
   const isPending = status === "pending";
+
+  function handleCopyPrompt() {
+    navigator.clipboard.writeText(prompt).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
 
   return (
     <div
@@ -19,7 +29,25 @@ export default function ImageCard({ image, onSelect, onDelete }) {
       {/* Image preview area */}
       <div className="image-preview">
         {isDone && url ? (
-          <img src={url} alt={prompt} loading="lazy" />
+          image.filename?.endsWith(".mp4") ? (
+            <video
+              src={url}
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="expandable"
+              onClick={() => onExpand && onExpand(image)}
+            />
+          ) : (
+            <img
+              src={url}
+              alt={prompt}
+              loading="lazy"
+              className="expandable"
+              onClick={() => onExpand && onExpand(image)}
+            />
+          )
         ) : isRunning ? (
           <div className="image-placeholder loading">
             <div className="spinner" />
@@ -60,15 +88,27 @@ export default function ImageCard({ image, onSelect, onDelete }) {
             <span>{selected ? "Selected" : "Not selected"}</span>
           </label>
         )}
-        <button
-          className="btn btn-icon btn-delete"
-          onClick={onDelete}
-          disabled={isRunning}
-          title="Delete image"
-          aria-label="Delete image"
-        >
-          ✕
-        </button>
+        <div className="image-actions-right">
+          <button
+            type="button"
+            className="btn btn-icon btn-copy"
+            onClick={handleCopyPrompt}
+            title="Copy prompt"
+            aria-label="Copy prompt"
+          >
+            {copied ? "✓" : "⎘"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-icon btn-delete"
+            onClick={onDelete}
+            disabled={isRunning}
+            title="Delete image"
+            aria-label="Delete image"
+          >
+            ✕
+          </button>
+        </div>
       </div>
     </div>
   );

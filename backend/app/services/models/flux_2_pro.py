@@ -5,6 +5,7 @@ from typing import Optional
 import replicate
 
 from app.services.models.base import ImageModel
+from app.utils import whiten_background
 
 FLUX_PROMPT = (
     "black and white coloring book page, thick bold clean outlines, "
@@ -60,4 +61,5 @@ class FluxProModel(ImageModel):
 
         output = replicate.run(self.model_id, input=payload)
 
-        return self._extract_bytes(output)
+        image_bytes = self._extract_bytes(output)
+        return whiten_background(image_bytes)

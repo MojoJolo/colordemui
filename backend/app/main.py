@@ -3,7 +3,7 @@ from typing import List
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.schemas import CreateJobRequest, ImageResponse, JobResponse, SelectRequest
@@ -64,7 +64,8 @@ async def create_job(request: CreateJobRequest, background_tasks: BackgroundTask
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    if model.accepts_image and (not request.image_data or len(request.image_data) == 0):
+    has_image_input = bool(request.image_data) or bool(request.selected_image_id)
+    if model.accepts_image and not has_image_input:
         raise HTTPException(
             status_code=400,
             detail=f"Model '{request.model}' requires an image input.",
@@ -75,6 +76,19 @@ async def create_job(request: CreateJobRequest, background_tasks: BackgroundTask
             prompts,
             model_name=request.model,
             image_data=request.image_data,
+            seed=request.seed,
+            num_outputs=request.num_outputs,
+            selected_image_id=request.selected_image_id,
+            duration=request.duration,
+            aspect_ratio=request.aspect_ratio,
+            selected_last_frame_image_id=request.selected_last_frame_image_id,
+            save_audio=request.save_audio,
+            first_frame_data=request.first_frame_data,
+            last_frame_data=request.last_frame_data,
+            lora_weights=request.lora_weights,
+            lora_scale=request.lora_scale,
+            hf_api_token=request.hf_api_token,
+            prompt_upsampling=request.prompt_upsampling,
         )
     except Exception as exc:
         import traceback
@@ -112,6 +126,18 @@ def unselect_all():
 def delete_selected():
     job_service.delete_selected_images()
     return {"ok": True}
+
+
+@app.get("/images/lora-zip")
+def download_lora_zip(trigger_word: str = ""):
+    buf = job_service.generate_lora_zip(trigger_word.strip())
+    if not buf:
+        raise HTTPException(status_code=400, detail="No selected raster images for LoRA export")
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=lora_dataset.zip"},
+    )
 
 
 @app.get("/images/pdf")

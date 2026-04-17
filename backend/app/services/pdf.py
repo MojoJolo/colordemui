@@ -9,6 +9,8 @@ from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
+from app.utils import whiten_background
+
 
 def _to_image_reader(image_path: Path) -> ImageReader:
     """Convert any supported image file to a ReportLab ImageReader."""
@@ -17,12 +19,12 @@ def _to_image_reader(image_path: Path) -> ImageReader:
         png_bytes = cairosvg.svg2png(url=str(image_path.resolve()), scale=2)
         return ImageReader(io.BytesIO(png_bytes))
     else:
-        # PNG, WebP, JPEG, etc. — normalise to PNG via Pillow
+        # PNG, WebP, JPEG, etc. — normalise to PNG via Pillow, then whiten background
         pil_img = Image.open(image_path).convert("RGBA")
         buf = io.BytesIO()
         pil_img.save(buf, format="PNG")
-        buf.seek(0)
-        return ImageReader(buf)
+        png_bytes = whiten_background(buf.getvalue())
+        return ImageReader(io.BytesIO(png_bytes))
 
 
 def generate_pdf(image_paths: List[Path], output_path: Path) -> None:

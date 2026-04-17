@@ -19,6 +19,20 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def whiten_background(image_bytes: bytes, threshold: int = 210) -> bytes:
+    """
+    Replace near-white pixels with pure white.
+    Converts to grayscale first so any off-white tint (warm/cool) is also caught.
+    Pixels brighter than `threshold` become 255; darker pixels (the lines) are kept as-is.
+    """
+    img = Image.open(io.BytesIO(image_bytes)).convert("L")
+    img = img.point(lambda p: 255 if p >= threshold else p)
+    img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def normalize_image(image_bytes: bytes) -> bytes:
     """
     Accept any image format (including HEIC) and return PNG bytes

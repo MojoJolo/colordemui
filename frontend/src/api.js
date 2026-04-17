@@ -12,14 +12,38 @@ export async function getAllImages() {
 }
 
 // Start a new generation job
-// model: "recraft-v3-svg" | "flux-dev"
-// imageData: array of base64 data URIs (required for flux-dev)
-export async function createJob(prompts, model = "recraft-v3-svg", imageData = null) {
+// model: "recraft-v3-svg" | "flux-2-pro" | "flux-2-klein-9b"
+// imageData: array of base64 data URIs (required for img2img models)
+// options: { seed?: number, numOutputs?: number }
+export async function createJob(prompts, model = "recraft-v3-svg", imageData = null, options = {}) {
+  const {
+    seed = null, numOutputs = 1, selectedImageId = null, duration = 5,
+    aspectRatio = "9:16", selectedLastFrameImageId = null, saveAudio = true,
+    firstFrameData = null, lastFrameData = null,
+    loraWeights = null, loraScale = 0.5, hfApiToken = null, promptUpsampling = false,
+  } = options;
   return handleResponse(
     await fetch("/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompts, model, image_data: imageData }),
+      body: JSON.stringify({
+        prompts,
+        model,
+        image_data: imageData,
+        seed,
+        num_outputs: numOutputs,
+        selected_image_id: selectedImageId,
+        duration,
+        aspect_ratio: aspectRatio,
+        selected_last_frame_image_id: selectedLastFrameImageId,
+        save_audio: saveAudio,
+        first_frame_data: firstFrameData,
+        last_frame_data: lastFrameData,
+        lora_weights: loraWeights,
+        lora_scale: loraScale,
+        hf_api_token: hfApiToken,
+        prompt_upsampling: promptUpsampling,
+      }),
     })
   );
 }
@@ -61,4 +85,11 @@ export async function deleteSelected() {
 
 export function getPdfUrl() {
   return "/images/pdf";
+}
+
+export function getLoraZipUrl(triggerWord = "") {
+  const params = triggerWord.trim()
+    ? `?trigger_word=${encodeURIComponent(triggerWord.trim())}`
+    : "";
+  return `/images/lora-zip${params}`;
 }

@@ -35,3 +35,12 @@ class JobRecord(BaseModel):
     images: List[ImageRecord] = []
     model: str = "recraft-v3-svg"
     has_ref_image: bool = False
+    seed: Optional[int] = None
+    num_ref_images: int = 0
+    duration: int = 5
+    aspect_ratio: str = "9:16"
+    save_audio: bool = True
+    lora_weights: Optional[str] = None
+    lora_scale: float = 0.5
+    hf_api_token: Optional[str] = None
+    prompt_upsampling: bool = False

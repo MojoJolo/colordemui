@@ -66,10 +66,35 @@ class ImageModel(ABC):
         """Whether this model supports an image input (img2img)."""
         return False
 
+    @property
+    def is_multi_reference(self) -> bool:
+        """True if this model takes all image_data as shared references and returns N outputs."""
+        return False
+
+    @property
+    def supports_duration(self) -> bool:
+        """Whether this model accepts a duration parameter."""
+        return False
+
+    @property
+    def supports_lora(self) -> bool:
+        """Whether this model accepts LoRA weights and related parameters."""
+        return False
+
     @abstractmethod
     def generate(self, prompt: str, image_bytes: Optional[bytes] = None) -> bytes:
         """Run the model and return raw image bytes."""
         pass
+
+    def generate_multi(
+        self,
+        prompt: str,
+        ref_images: list,
+        num_outputs: int = 1,
+        seed: Optional[int] = None,
+    ) -> list:
+        """Run the model with multiple shared reference images and return a list of image bytes."""
+        raise NotImplementedError("This model does not support generate_multi()")
 
     def _extract_bytes(self, output) -> bytes:
         """Normalise the various output shapes the Replicate SDK can return."""

@@ -30,6 +30,16 @@ def ref_image_path_for_image(image_id: str) -> Path:
     return JOBS_DIR / f"ref_img_{image_id}.png"
 
 
+def multi_ref_image_path(job_id: str, index: int) -> Path:
+    """Path for a shared reference image in multi-reference jobs (flux-2-klein-9b)."""
+    return JOBS_DIR / f"mref_{job_id}_{index}.png"
+
+
+def last_frame_path_for_image(image_id: str) -> Path:
+    """Path for the last-frame reference image in p-video jobs."""
+    return JOBS_DIR / f"last_frame_{image_id}.png"
+
+
 def save_job(job: JobRecord) -> None:
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
     job_metadata_path(job.job_id).write_text(job.model_dump_json(indent=2))
