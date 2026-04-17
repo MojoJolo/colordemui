@@ -265,6 +265,18 @@ export default function App() {
             >
               ✕
             </button>
+            {expandedImage.filename?.endsWith(".mp4") && (
+              <a
+                href={expandedImage.url}
+                download={expandedImage.filename}
+                className="lightbox-download"
+                onClick={(e) => e.stopPropagation()}
+                title="Download video"
+                aria-label="Download video"
+              >
+                ↓ Download
+              </a>
+            )}
           </div>
         </div>
       )}
