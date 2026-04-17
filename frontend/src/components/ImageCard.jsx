@@ -10,10 +10,28 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
   const isPending = status === "pending";
 
   function handleCopyPrompt() {
-    navigator.clipboard.writeText(prompt).then(() => {
+    const text = prompt ?? "";
+    const showSuccess = () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    };
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(showSuccess).catch(() => legacyCopy(text, showSuccess));
+    } else {
+      legacyCopy(text, showSuccess);
+    }
+  }
+
+  function legacyCopy(text, onSuccess) {
+    const el = document.createElement("textarea");
+    el.value = text;
+    el.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    if (document.execCommand("copy")) onSuccess();
+    document.body.removeChild(el);
   }
 
   return (
