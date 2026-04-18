@@ -204,7 +204,7 @@ export default function PVideoForm({ onGenerate, isGenerating, images }) {
         className="pvideo-duration-slider"
         value={duration}
         min={1}
-        max={10}
+        max={30}
         step={1}
         onChange={(e) => setDuration(Number(e.target.value))}
         disabled={isGenerating}

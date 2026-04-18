@@ -1,5 +1,14 @@
 import { useRef, useState } from "react";
 
+const ASPECT_RATIOS = [
+  { value: "9:16", label: "9:16", desc: "TikTok" },
+  { value: "1:1",  label: "1:1",  desc: "Square" },
+  { value: "4:5",  label: "4:5",  desc: "Portrait" },
+  { value: "16:9", label: "16:9", desc: "Wide" },
+  { value: "3:4",  label: "3:4",  desc: "Classic" },
+  { value: "2:3",  label: "2:3",  desc: "Story" },
+];
+
 const MAX_PIXELS = 1_000_000;
 
 function readFileAsDataUrl(file) {
@@ -71,6 +80,7 @@ export default function FluxKleinForm({ onGenerate, isGenerating, images = [] })
   const [prompt, setPrompt] = useState("");
   const [seed, setSeed] = useState("");
   const [numOutputs, setNumOutputs] = useState(1);
+  const [aspectRatio, setAspectRatio] = useState("9:16");
   const [uploadError, setUploadError] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -144,7 +154,7 @@ export default function FluxKleinForm({ onGenerate, isGenerating, images = [] })
       parsedPrompts,
       "flux-2-klein-9b",
       dataUrls,
-      { seed: parsedSeed, numOutputs }
+      { seed: parsedSeed, numOutputs, aspectRatio }
     );
   }
 
@@ -285,6 +295,23 @@ export default function FluxKleinForm({ onGenerate, isGenerating, images = [] })
             disabled={isGenerating}
           />
         </div>
+      </div>
+
+      {/* Aspect Ratio */}
+      <label className="prompt-label">Aspect Ratio</label>
+      <div className="pvideo-aspect-grid">
+        {ASPECT_RATIOS.map(({ value, label, desc }) => (
+          <button
+            key={value}
+            type="button"
+            className={`pvideo-aspect-btn${aspectRatio === value ? " selected" : ""}`}
+            onClick={() => setAspectRatio(value)}
+            disabled={isGenerating}
+          >
+            <span className="pvideo-aspect-ratio">{label}</span>
+            <span className="pvideo-aspect-desc">{desc}</span>
+          </button>
+        ))}
       </div>
 
       <button

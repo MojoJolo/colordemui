@@ -40,6 +40,7 @@ class FluxKlein9bModel(ImageModel):
         prompt: str,
         ref_images: List[bytes],
         seed: Optional[int] = None,
+        aspect_ratio: str = "9:16",
     ) -> bytes:
         """Single API call → single image bytes."""
         if not os.environ.get("REPLICATE_API_TOKEN"):
@@ -59,7 +60,7 @@ class FluxKlein9bModel(ImageModel):
             "input_images": [io.BytesIO(b) for b in ref_images],
             "seed": seed,
             "disable_safety_checker": True,
-            "aspect_ratio": "4:5",
+            "aspect_ratio": aspect_ratio,
         }
 
         loggable = {
@@ -77,10 +78,11 @@ class FluxKlein9bModel(ImageModel):
         ref_images: List[bytes],
         num_outputs: int = 1,
         seed: Optional[int] = None,
+        aspect_ratio: str = "9:16",
     ) -> List[bytes]:
         """Make num_outputs sequential API calls, incrementing seed each time."""
         results = []
         for i in range(num_outputs):
             img_seed = (seed + i) if seed is not None else None
-            results.append(self.generate_one(prompt, ref_images, img_seed))
+            results.append(self.generate_one(prompt, ref_images, img_seed, aspect_ratio))
         return results
