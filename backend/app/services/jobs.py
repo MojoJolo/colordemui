@@ -104,6 +104,7 @@ def create_job(
             has_ref_image=bool(image_data),
             seed=seed,
             num_ref_images=len(image_data or []),
+            aspect_ratio=aspect_ratio,
         )
     elif selected_image_id or first_frame_data:
         # First frame from gallery or uploaded data URI (e.g. for p-video)
@@ -242,6 +243,7 @@ async def run_job(job_id: str) -> None:
                     image.prompt,
                     ref_bytes_list,
                     img_seed,
+                    job.aspect_ratio,
                 )
                 img_bytes = await loop.run_in_executor(_executor, fn)
 
