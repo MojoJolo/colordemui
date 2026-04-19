@@ -238,13 +238,23 @@ async def run_job(job_id: str) -> None:
             img_seed = (job.seed + i) if job.seed is not None else None
 
             try:
-                fn = functools.partial(
-                    model.generate_one,
-                    image.prompt,
-                    ref_bytes_list,
-                    img_seed,
-                    job.aspect_ratio,
-                )
+                if model.supports_edit_preset:
+                    fn = functools.partial(
+                        model.generate_one,
+                        image.prompt,
+                        ref_bytes_list,
+                        img_seed,
+                        job.aspect_ratio,
+                        job.lora_weights,
+                    )
+                else:
+                    fn = functools.partial(
+                        model.generate_one,
+                        image.prompt,
+                        ref_bytes_list,
+                        img_seed,
+                        job.aspect_ratio,
+                    )
                 img_bytes = await loop.run_in_executor(_executor, fn)
 
                 filename = f"{image.image_id}{model.output_extension}"

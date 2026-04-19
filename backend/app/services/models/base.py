@@ -81,6 +81,11 @@ class ImageModel(ABC):
         """Whether this model accepts LoRA weights and related parameters."""
         return False
 
+    @property
+    def supports_edit_preset(self) -> bool:
+        """Whether this model accepts a replicate_weights edit preset."""
+        return False
+
     @abstractmethod
     def generate(self, prompt: str, image_bytes: Optional[bytes] = None) -> bytes:
         """Run the model and return raw image bytes."""

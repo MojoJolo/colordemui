@@ -5,6 +5,7 @@ import FluxKleinForm from "./components/FluxKleinForm";
 import ZImageTurboForm from "./components/ZImageTurboForm";
 import PVideoForm from "./components/PVideoForm";
 import PImageLoraForm from "./components/PImageLoraForm";
+import PImageEditForm from "./components/PImageEditForm";
 import ImageGrid from "./components/ImageGrid";
 import ProgressPanel from "./components/ProgressPanel";
 import PromptForm from "./components/PromptForm";
@@ -203,6 +204,13 @@ export default function App() {
           >
             P-Image LoRA
           </button>
+          <button
+            className={`tab${activePage === "p-image-edit" ? " active" : ""}`}
+            onClick={() => setActivePage("p-image-edit")}
+            type="button"
+          >
+            P-Image Edit
+          </button>
         </nav>
       </header>
 
@@ -221,6 +229,9 @@ export default function App() {
         )}
         {activePage === "p-image-lora" && (
           <PImageLoraForm onGenerate={handleGenerate} isGenerating={isGenerating} />
+        )}
+        {activePage === "p-image-edit" && (
+          <PImageEditForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
         )}
 
         {error && <div className="error-banner">{error}</div>}
