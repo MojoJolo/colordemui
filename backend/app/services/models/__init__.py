@@ -7,6 +7,7 @@ from app.services.models.flux_2_klein_9b import FluxKlein9bModel
 from app.services.models.z_image_turbo import ZImageTurboModel
 from app.services.models.p_video import PVideoModel
 from app.services.models.p_image_lora import PImageLoraModel
+from app.services.models.p_image_edit import PImageEditModel
 
 # ---------------------------------------------------------------------------
 # Registry — add new models here, nothing else needs to change.
@@ -18,6 +19,7 @@ _REGISTRY: Dict[str, ImageModel] = {
     "z-image-turbo": ZImageTurboModel(),
     "p-video": PVideoModel(),
     "p-image-lora": PImageLoraModel(),
+    "p-image-edit": PImageEditModel(),
 }
 
 
