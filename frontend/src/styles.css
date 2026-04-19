@@ -59,6 +59,13 @@ body {
   border-top: 1px solid #e2e5ea;
   margin: 0 -2rem;
   padding: 0 2rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.page-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
@@ -72,6 +79,8 @@ body {
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
   margin-bottom: -1px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab:hover {
