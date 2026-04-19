@@ -1,10 +1,14 @@
+import os
+import secrets
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.schemas import CreateJobRequest, ImageResponse, JobResponse, SelectRequest
 from app.services import jobs as job_service
@@ -12,6 +16,12 @@ from app.services import models as model_registry
 
 GENERATED_DIR = Path("generated")
 GENERATED_DIR.mkdir(exist_ok=True)
+
+AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "admin")
+AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "admin")
+_valid_tokens: set[str] = set()
+
+_PUBLIC_PATHS = {"/auth/login", "/health"}
 
 app = FastAPI(title="Coloring Book Generator")
 
@@ -22,7 +32,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS" or request.url.path in _PUBLIC_PATHS:
+            return await call_next(request)
+        auth = request.headers.get("authorization", "")
+        token = request.query_params.get("token", "")
+        if auth.startswith("Bearer "):
+            t = auth[7:]
+        elif token:
+            t = token
+        else:
+            return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+        if t not in _valid_tokens:
+            return JSONResponse({"detail": "Invalid or expired token"}, status_code=401)
+        return await call_next(request)
+
+
+app.add_middleware(AuthMiddleware)
+
 app.mount("/generated", StaticFiles(directory=str(GENERATED_DIR)), name="generated")
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/auth/login")
+def login(req: LoginRequest):
+    if req.username != AUTH_USERNAME or req.password != AUTH_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = secrets.token_urlsafe(32)
+    _valid_tokens.add(token)
+    return {"token": token}
+
+
+@app.post("/auth/logout")
+def logout(request: Request):
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        _valid_tokens.discard(auth[7:])
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

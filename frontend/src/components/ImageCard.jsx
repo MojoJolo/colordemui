@@ -10,10 +10,41 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
   const isPending = status === "pending";
 
   function handleCopyPrompt() {
-    navigator.clipboard.writeText(prompt).then(() => {
+    const markCopied = () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    };
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(prompt).then(markCopied).catch(() => {
+        fallbackCopy(prompt, markCopied);
+      });
+    } else {
+      fallbackCopy(prompt, markCopied);
+    }
+  }
+
+  function fallbackCopy(text, onSuccess) {
+    const el = document.createElement("textarea");
+    el.value = text;
+    el.contentEditable = "true";
+    el.readOnly = false;
+    el.style.cssText = "position:absolute;left:-9999px;top:-9999px";
+    document.body.appendChild(el);
+    // iOS Safari requires a range/selection instead of el.select()
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    el.setSelectionRange(0, text.length);
+    try {
+      document.execCommand("copy");
+      onSuccess();
+    } catch (_) {
+      // copy not supported
+    }
+    document.body.removeChild(el);
   }
 
   return (

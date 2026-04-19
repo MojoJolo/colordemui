@@ -7,12 +7,14 @@ import PVideoForm from "./components/PVideoForm";
 import PImageLoraForm from "./components/PImageLoraForm";
 import PImageEditForm from "./components/PImageEditForm";
 import ImageGrid from "./components/ImageGrid";
+import LoginPage from "./components/LoginPage";
 import ProgressPanel from "./components/ProgressPanel";
 import PromptForm from "./components/PromptForm";
 import Toolbar from "./components/Toolbar";
 import "./styles.css";
 
 export default function App() {
+  const [token, setToken] = useState(() => localStorage.getItem("auth_token"));
   // All images across all jobs — persists across page refreshes
   const [images, setImages] = useState([]);
   // Active job — only used for progress tracking while generating
@@ -24,12 +26,20 @@ export default function App() {
   const [loraTriggerWord, setLoraTriggerWord] = useState("");
   const pollRef = useRef(null);
 
+  // Listen for 401 responses from any API call
+  useEffect(() => {
+    function onAuthLogout() { setToken(null); }
+    window.addEventListener("auth:logout", onAuthLogout);
+    return () => window.removeEventListener("auth:logout", onAuthLogout);
+  }, []);
+
   // Load all previously generated images when the page opens
   useEffect(() => {
+    if (!token) return;
     api.getAllImages()
       .then(setImages)
       .catch((err) => console.error("Failed to load images:", err));
-  }, []);
+  }, [token]);
 
   // Close lightbox on Escape
   useEffect(() => {
@@ -149,6 +159,15 @@ export default function App() {
     window.open(api.getLoraZipUrl(loraTriggerWord), "_blank");
   }
 
+  async function handleLogout() {
+    await api.logout();
+    setToken(null);
+  }
+
+  if (!token) {
+    return <LoginPage onLogin={() => setToken(localStorage.getItem("auth_token"))} />;
+  }
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -163,10 +182,11 @@ export default function App() {
         <div className="app-header-top">
           <div>
             <h1>Coloring Book Generator</h1>
-            <p className="subtitle">
-              Generate images via Replicate
-            </p>
+            <p className="subtitle">Generate images via Replicate</p>
           </div>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={handleLogout}>
+            Sign out
+          </button>
         </div>
         <nav className="page-tabs">
           <button
