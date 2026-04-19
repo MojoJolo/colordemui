@@ -27,9 +27,17 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
   function fallbackCopy(text, onSuccess) {
     const el = document.createElement("textarea");
     el.value = text;
+    el.contentEditable = "true";
+    el.readOnly = false;
     el.style.cssText = "position:absolute;left:-9999px;top:-9999px";
     document.body.appendChild(el);
-    el.select();
+    // iOS Safari requires a range/selection instead of el.select()
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    el.setSelectionRange(0, text.length);
     try {
       document.execCommand("copy");
       onSuccess();
