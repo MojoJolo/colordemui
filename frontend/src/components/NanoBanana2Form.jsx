@@ -11,6 +11,7 @@ const ASPECT_RATIOS = [
 ];
 
 const MAX_PIXELS = 1_000_000;
+const MAX_IMAGES = 4;
 
 function scaleViaCanvas(file) {
   return new Promise((resolve, reject) => {
@@ -58,7 +59,7 @@ function scaleFromUrl(url) {
 }
 
 export default function NanoBanana2Form({ onGenerate, isGenerating, images = [] }) {
-  const [refImage, setRefImage] = useState(null);
+  const [refImages, setRefImages] = useState([]);
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [seed, setSeed] = useState("");
@@ -70,40 +71,55 @@ export default function NanoBanana2Form({ onGenerate, isGenerating, images = [] 
     (img) => img.status === "done" && img.url && !img.filename?.endsWith(".mp4")
   );
 
+  const addedGalleryIds = new Set(
+    refImages.filter((r) => r.galleryId).map((r) => r.galleryId)
+  );
+
+  const atLimit = refImages.length >= MAX_IMAGES;
+
   async function handleGalleryToggle(img) {
-    if (refImage?.galleryId === img.image_id) {
-      setRefImage(null);
+    if (addedGalleryIds.has(img.image_id)) {
+      setRefImages((prev) => prev.filter((r) => r.galleryId !== img.image_id));
       return;
     }
+    if (atLimit) return;
     try {
       const { dataUrl, w, h } = await scaleFromUrl(img.url);
       const label = img.prompt.length > 40 ? img.prompt.slice(0, 40) + "…" : img.prompt;
-      setRefImage({ dataUrl, w, h, label, galleryId: img.image_id });
+      setRefImages((prev) => [...prev, { dataUrl, w, h, label, galleryId: img.image_id }]);
     } catch (e) {
       console.error("Failed to load gallery image:", e);
     }
   }
 
-  async function handleImageFile(file) {
-    if (!file) return;
+  async function handleImageFiles(files) {
+    if (!files || files.length === 0) return;
     setUploadError(null);
-    try {
-      const { dataUrl, w, h } = await scaleViaCanvas(file);
-      setRefImage({ dataUrl, w, h, label: `${w} × ${h}px` });
-    } catch (e) {
-      setUploadError("Could not load image. Please try another file.");
+    const slots = MAX_IMAGES - refImages.length;
+    const toProcess = Array.from(files).slice(0, slots);
+    const results = [];
+    for (const file of toProcess) {
+      try {
+        const { dataUrl, w, h } = await scaleViaCanvas(file);
+        results.push({ dataUrl, w, h, label: `${w} × ${h}px` });
+      } catch {
+        setUploadError("Could not load one or more images. Please try different files.");
+      }
+    }
+    if (results.length > 0) {
+      setRefImages((prev) => [...prev, ...results]);
     }
   }
 
   function handleDrop(e) {
     e.preventDefault();
-    handleImageFile(e.dataTransfer.files?.[0]);
+    handleImageFiles(e.dataTransfer.files);
   }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!prompt.trim()) return;
-    const dataUrls = refImage ? [refImage.dataUrl] : null;
+    const dataUrls = refImages.length > 0 ? refImages.map((r) => r.dataUrl) : null;
     const parsedSeed = seed.trim() !== "" ? parseInt(seed, 10) : null;
     onGenerate(
       [prompt.trim()],
@@ -119,19 +135,19 @@ export default function NanoBanana2Form({ onGenerate, isGenerating, images = [] 
     <form className="prompt-form" onSubmit={handleSubmit}>
       <div className="klein-form-header">
         <span className="klein-model-badge">nano-banana-2</span>
-        <span className="klein-model-desc">Text-to-image · optional reference · Gemini 3.1 Flash</span>
+        <span className="klein-model-desc">Text-to-image · optional references · Gemini 3.1 Flash</span>
       </div>
 
       {candidates.length > 0 && (
         <>
           <label className="prompt-label">
-            From Gallery <span className="pvideo-optional">(optional reference)</span>
+            From Gallery <span className="pvideo-optional">(optional, up to {MAX_IMAGES})</span>
           </label>
           <div className="pvideo-picker">
             {candidates.map((img) => (
               <div
                 key={img.image_id}
-                className={`pvideo-thumb${refImage?.galleryId === img.image_id ? " selected" : ""}`}
+                className={`pvideo-thumb${addedGalleryIds.has(img.image_id) ? " selected" : ""}${atLimit && !addedGalleryIds.has(img.image_id) ? " disabled" : ""}`}
                 onClick={() => !isGenerating && handleGalleryToggle(img)}
                 title={img.prompt}
               >
@@ -143,44 +159,56 @@ export default function NanoBanana2Form({ onGenerate, isGenerating, images = [] 
       )}
 
       <label className="prompt-label">
-        Reference Image <span className="pvideo-optional">(optional)</span>
+        Reference Images <span className="pvideo-optional">(optional, up to {MAX_IMAGES})</span>
       </label>
       <div
-        className={`image-upload-zone ${refImage ? "has-image" : ""}`}
+        className={`image-upload-zone ${refImages.length > 0 ? "has-image" : ""}`}
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
-        onClick={() => !isGenerating && !refImage && fileInputRef.current?.click()}
+        onClick={() => !isGenerating && !atLimit && fileInputRef.current?.click()}
       >
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
+          multiple
           style={{ display: "none" }}
-          onChange={(e) => { handleImageFile(e.target.files?.[0]); e.target.value = ""; }}
-          disabled={isGenerating || !!refImage}
+          onChange={(e) => { handleImageFiles(e.target.files); e.target.value = ""; }}
+          disabled={isGenerating || atLimit}
         />
-        {refImage ? (
+        {refImages.length > 0 ? (
           <div className="upload-preview-grid">
-            <div className="upload-preview">
-              <img src={refImage.dataUrl} alt="Reference" />
-              <div className="upload-preview-info">
-                <span>{refImage.label}</span>
-                {!isGenerating && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={(e) => { e.stopPropagation(); setRefImage(null); }}
-                  >
-                    Remove
-                  </button>
-                )}
+            {refImages.map((img, i) => (
+              <div key={i} className="upload-preview">
+                <img src={img.dataUrl} alt={`Reference ${i + 1}`} />
+                <div className="upload-preview-info">
+                  <span>{img.label}</span>
+                  {!isGenerating && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={(e) => { e.stopPropagation(); setRefImages((prev) => prev.filter((_, j) => j !== i)); }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            ))}
+            {!atLimit && !isGenerating && (
+              <div
+                className="upload-preview upload-preview-add"
+                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+              >
+                <span className="upload-icon">+</span>
+                <span>Add image</span>
+              </div>
+            )}
           </div>
         ) : (
           <div className="upload-empty">
             <span className="upload-icon">↑</span>
-            <span>Drop an image or click to upload</span>
+            <span>Drop images or click to upload</span>
             <span className="upload-hint">Optional — guides the generation style</span>
           </div>
         )}
