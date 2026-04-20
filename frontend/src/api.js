@@ -127,6 +127,11 @@ export async function deleteSelected() {
   return handleResponse(await fetch("/images/selected", { method: "DELETE", headers: authHeaders() }));
 }
 
+export function getImageUrl(url) {
+  const token = getToken();
+  return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+}
+
 export function getPdfUrl() {
   const token = getToken();
   return token ? `/images/pdf?token=${encodeURIComponent(token)}` : "/images/pdf";

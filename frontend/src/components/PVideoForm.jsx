@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { getImageUrl } from "../api";
 
 const MAX_PIXELS = 1_000_000;
 
@@ -68,7 +69,7 @@ function FrameSlot({ label, optional, candidates, selectedId, onSelectId, upload
               }}
               title={img.prompt}
             >
-              <img src={img.url} alt={img.prompt} />
+              <img src={getImageUrl(img.url)} alt={img.prompt} />
             </div>
           ))}
         </div>

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { getImageUrl } from "../api";
 
 const ASPECT_RATIOS = [
   { value: "9:16", label: "9:16", desc: "TikTok" },
@@ -181,7 +182,7 @@ export default function FluxKleinForm({ onGenerate, isGenerating, images = [] })
                 onClick={() => !isGenerating && handleGalleryToggle(img)}
                 title={img.prompt}
               >
-                <img src={img.url} alt={img.prompt} />
+                <img src={getImageUrl(img.url)} alt={img.prompt} />
               </div>
             ))}
           </div>

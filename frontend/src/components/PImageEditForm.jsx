@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { getImageUrl } from "../api";
 
 const ASPECT_RATIOS = [
   { value: "match_input_image", label: "Match", desc: "Input" },
@@ -204,7 +205,7 @@ export default function PImageEditForm({ onGenerate, isGenerating, images = [] }
                 onClick={() => !isGenerating && handleGalleryToggle(img)}
                 title={img.prompt}
               >
-                <img src={img.url} alt={img.prompt} />
+                <img src={getImageUrl(img.url)} alt={img.prompt} />
               </div>
             ))}
           </div>
