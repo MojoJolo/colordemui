@@ -1,8 +1,25 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 
 export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
   const { status, url, prompt, selected, error } = image;
   const [copied, setCopied] = useState(false);
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !url) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          video.src = url;
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, [url]);
 
   const isDone = status === "done";
   const isFailed = status === "failed";
@@ -103,11 +120,10 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
         {isDone && url ? (
           image.filename?.endsWith(".mp4") ? (
             <video
-              src={url}
-              autoPlay
-              loop
+              ref={videoRef}
               muted
               playsInline
+              preload="none"
               className="expandable"
               onClick={() => onExpand && onExpand(image)}
             />
