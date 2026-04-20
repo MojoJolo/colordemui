@@ -62,8 +62,11 @@ class GrokVideoModel(ImageModel):
         if image_bytes is not None:
             buf = io.BytesIO(image_bytes)
             if _is_video(image_bytes):
-                buf.name = "input.mp4"
-                payload["video"] = buf
+                # Upload with explicit MIME type — mimetypes.guess_type can return None on
+                # minimal Linux systems, causing the file to land as application/octet-stream,
+                # which the grok model rejects even though the URL ends in .mp4.
+                uploaded = replicate.files.create(buf, filename="input.mp4", content_type="video/mp4")
+                payload["video"] = uploaded
             else:
                 buf.name = "image.png"
                 payload["image"] = buf
