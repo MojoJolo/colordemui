@@ -5,6 +5,7 @@ import FluxKleinForm from "./components/FluxKleinForm";
 import ZImageTurboForm from "./components/ZImageTurboForm";
 import PVideoForm from "./components/PVideoForm";
 import GrokVideoForm from "./components/GrokVideoForm";
+import NanoBanana2Form from "./components/NanoBanana2Form";
 import PImageLoraForm from "./components/PImageLoraForm";
 import PImageEditForm from "./components/PImageEditForm";
 import ImageGrid from "./components/ImageGrid";
@@ -239,6 +240,13 @@ export default function App() {
           >
             Grok Video
           </button>
+          <button
+            className={`tab${activePage === "nano-banana-2" ? " active" : ""}`}
+            onClick={() => setActivePage("nano-banana-2")}
+            type="button"
+          >
+            Nano Banana 2
+          </button>
         </nav>
       </header>
 
@@ -263,6 +271,9 @@ export default function App() {
         )}
         {activePage === "grok-video" && (
           <GrokVideoForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
+        )}
+        {activePage === "nano-banana-2" && (
+          <NanoBanana2Form onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
         )}
 
         {error && <div className="error-banner">{error}</div>}
