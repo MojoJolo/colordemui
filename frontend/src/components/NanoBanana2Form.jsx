@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 const ASPECT_RATIOS = [
   { value: "9:16",  label: "9:16",  desc: "Reels" },
@@ -10,121 +10,20 @@ const ASPECT_RATIOS = [
   { value: "2:3",   label: "2:3",   desc: "Story" },
 ];
 
-const MAX_PIXELS = 1_000_000;
-const MAX_IMAGES = 4;
-
-function scaleViaCanvas(file) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const total = img.width * img.height;
-      let w = img.width, h = img.height;
-      if (total > MAX_PIXELS) {
-        const s = Math.sqrt(MAX_PIXELS / total);
-        w = Math.round(w * s);
-        h = Math.round(h * s);
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-      resolve({ dataUrl: canvas.toDataURL("image/png"), w, h });
-    };
-    img.onerror = reject;
-    img.src = URL.createObjectURL(file);
-  });
-}
-
-function scaleFromUrl(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      const total = img.width * img.height;
-      let w = img.width, h = img.height;
-      if (total > MAX_PIXELS) {
-        const s = Math.sqrt(MAX_PIXELS / total);
-        w = Math.round(w * s);
-        h = Math.round(h * s);
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-      resolve({ dataUrl: canvas.toDataURL("image/png"), w, h });
-    };
-    img.onerror = reject;
-    img.src = url;
-  });
-}
-
-export default function NanoBanana2Form({ onGenerate, isGenerating, images = [] }) {
-  const [refImages, setRefImages] = useState([]);
+export default function NanoBanana2Form({ onGenerate, isGenerating }) {
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [seed, setSeed] = useState("");
   const [numOutputs, setNumOutputs] = useState(1);
-  const [uploadError, setUploadError] = useState(null);
-  const fileInputRef = useRef(null);
-
-  const candidates = images.filter(
-    (img) => img.status === "done" && img.url && !img.filename?.endsWith(".mp4")
-  );
-
-  const addedGalleryIds = new Set(
-    refImages.filter((r) => r.galleryId).map((r) => r.galleryId)
-  );
-
-  const atLimit = refImages.length >= MAX_IMAGES;
-
-  async function handleGalleryToggle(img) {
-    if (addedGalleryIds.has(img.image_id)) {
-      setRefImages((prev) => prev.filter((r) => r.galleryId !== img.image_id));
-      return;
-    }
-    if (atLimit) return;
-    try {
-      const { dataUrl, w, h } = await scaleFromUrl(img.url);
-      const label = img.prompt.length > 40 ? img.prompt.slice(0, 40) + "…" : img.prompt;
-      setRefImages((prev) => [...prev, { dataUrl, w, h, label, galleryId: img.image_id }]);
-    } catch (e) {
-      console.error("Failed to load gallery image:", e);
-    }
-  }
-
-  async function handleImageFiles(files) {
-    if (!files || files.length === 0) return;
-    setUploadError(null);
-    const slots = MAX_IMAGES - refImages.length;
-    const toProcess = Array.from(files).slice(0, slots);
-    const results = [];
-    for (const file of toProcess) {
-      try {
-        const { dataUrl, w, h } = await scaleViaCanvas(file);
-        results.push({ dataUrl, w, h, label: `${w} × ${h}px` });
-      } catch {
-        setUploadError("Could not load one or more images. Please try different files.");
-      }
-    }
-    if (results.length > 0) {
-      setRefImages((prev) => [...prev, ...results]);
-    }
-  }
-
-  function handleDrop(e) {
-    e.preventDefault();
-    handleImageFiles(e.dataTransfer.files);
-  }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!prompt.trim()) return;
-    const dataUrls = refImages.length > 0 ? refImages.map((r) => r.dataUrl) : null;
     const parsedSeed = seed.trim() !== "" ? parseInt(seed, 10) : null;
     onGenerate(
       [prompt.trim()],
       "nano-banana-2",
-      dataUrls,
+      null,
       { aspectRatio, seed: parsedSeed, numOutputs }
     );
   }
@@ -135,85 +34,8 @@ export default function NanoBanana2Form({ onGenerate, isGenerating, images = [] 
     <form className="prompt-form" onSubmit={handleSubmit}>
       <div className="klein-form-header">
         <span className="klein-model-badge">nano-banana-2</span>
-        <span className="klein-model-desc">Text-to-image · optional references · Gemini 3.1 Flash</span>
+        <span className="klein-model-desc">Text-to-image · Gemini 3.1 Flash</span>
       </div>
-
-      {candidates.length > 0 && (
-        <>
-          <label className="prompt-label">
-            From Gallery <span className="pvideo-optional">(optional, up to {MAX_IMAGES})</span>
-          </label>
-          <div className="pvideo-picker">
-            {candidates.map((img) => (
-              <div
-                key={img.image_id}
-                className={`pvideo-thumb${addedGalleryIds.has(img.image_id) ? " selected" : ""}${atLimit && !addedGalleryIds.has(img.image_id) ? " disabled" : ""}`}
-                onClick={() => !isGenerating && handleGalleryToggle(img)}
-                title={img.prompt}
-              >
-                <img src={img.url} alt={img.prompt} />
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      <label className="prompt-label">
-        Reference Images <span className="pvideo-optional">(optional, up to {MAX_IMAGES})</span>
-      </label>
-      <div
-        className={`image-upload-zone ${refImages.length > 0 ? "has-image" : ""}`}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={handleDrop}
-        onClick={() => !isGenerating && !atLimit && fileInputRef.current?.click()}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          style={{ display: "none" }}
-          onChange={(e) => { handleImageFiles(e.target.files); e.target.value = ""; }}
-          disabled={isGenerating || atLimit}
-        />
-        {refImages.length > 0 ? (
-          <div className="upload-preview-grid">
-            {refImages.map((img, i) => (
-              <div key={i} className="upload-preview">
-                <img src={img.dataUrl} alt={`Reference ${i + 1}`} />
-                <div className="upload-preview-info">
-                  <span>{img.label}</span>
-                  {!isGenerating && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={(e) => { e.stopPropagation(); setRefImages((prev) => prev.filter((_, j) => j !== i)); }}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {!atLimit && !isGenerating && (
-              <div
-                className="upload-preview upload-preview-add"
-                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-              >
-                <span className="upload-icon">+</span>
-                <span>Add image</span>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="upload-empty">
-            <span className="upload-icon">↑</span>
-            <span>Drop images or click to upload</span>
-            <span className="upload-hint">Optional — guides the generation style</span>
-          </div>
-        )}
-      </div>
-      {uploadError && <p className="upload-error">{uploadError}</p>}
 
       <label htmlFor="nb2-prompt" className="prompt-label">Prompt</label>
       <textarea
