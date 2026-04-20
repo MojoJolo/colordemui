@@ -13,6 +13,11 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
         if (entry.isIntersecting) {
           video.preload = "metadata";
           video.src = url;
+          video.addEventListener(
+            "loadedmetadata",
+            () => { video.currentTime = 0.001; },
+            { once: true }
+          );
           observer.disconnect();
         }
       },
