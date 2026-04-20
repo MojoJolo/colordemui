@@ -66,7 +66,7 @@ class GrokVideoModel(ImageModel):
                 # minimal Linux systems, causing the file to land as application/octet-stream,
                 # which the grok model rejects even though the URL ends in .mp4.
                 uploaded = replicate.files.create(buf, filename="input.mp4", content_type="video/mp4")
-                payload["video"] = uploaded
+                payload["video"] = uploaded.urls["get"]
             else:
                 buf.name = "image.png"
                 payload["image"] = buf
