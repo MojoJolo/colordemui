@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { getImageUrl } from "../api";
 
 export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
   const { status, url, prompt, selected, error } = image;
@@ -63,7 +62,7 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
         {isDone && url ? (
           image.filename?.endsWith(".mp4") ? (
             <video
-              src={getImageUrl(url)}
+              src={url}
               autoPlay
               loop
               muted
@@ -73,7 +72,7 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
             />
           ) : (
             <img
-              src={getImageUrl(url)}
+              src={url}
               alt={prompt}
               loading="lazy"
               className="expandable"
@@ -132,7 +131,7 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
           </button>
           {isDone && image.filename?.endsWith(".mp4") && (
             <a
-              href={getImageUrl(url)}
+              href={url}
               download={image.filename}
               className="btn btn-icon btn-copy"
               title="Download video"

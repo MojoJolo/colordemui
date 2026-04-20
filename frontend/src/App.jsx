@@ -296,9 +296,9 @@ export default function App() {
         <div className="lightbox-backdrop" onClick={() => setExpandedImage(null)}>
           <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
             {expandedImage.filename?.endsWith(".mp4") ? (
-              <video src={api.getImageUrl(expandedImage.url)} controls autoPlay loop />
+              <video src={expandedImage.url} controls autoPlay loop />
             ) : (
-              <img src={api.getImageUrl(expandedImage.url)} alt={expandedImage.prompt} />
+              <img src={expandedImage.url} alt={expandedImage.prompt} />
             )}
             <button
               className="lightbox-close"

@@ -22,6 +22,7 @@ AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "admin")
 _valid_tokens: set[str] = set()
 
 _PUBLIC_PATHS = {"/auth/login", "/health"}
+_PUBLIC_PREFIXES = ("/generated/",)
 
 app = FastAPI(title="Coloring Book Generator")
 
@@ -35,7 +36,7 @@ app.add_middleware(
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS" or request.url.path in _PUBLIC_PATHS:
+        if request.method == "OPTIONS" or request.url.path in _PUBLIC_PATHS or request.url.path.startswith(_PUBLIC_PREFIXES):
             return await call_next(request)
         auth = request.headers.get("authorization", "")
         token = request.query_params.get("token", "")
