@@ -68,7 +68,7 @@ function FrameSlot({ label, optional, candidates, selectedId, onSelectId, upload
               }}
               title={img.prompt}
             >
-              <img src={img.url} alt={img.prompt} />
+              <img src={img.url} alt={img.prompt} loading="lazy" />
             </div>
           ))}
         </div>

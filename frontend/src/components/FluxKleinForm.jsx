@@ -181,7 +181,7 @@ export default function FluxKleinForm({ onGenerate, isGenerating, images = [] })
                 onClick={() => !isGenerating && handleGalleryToggle(img)}
                 title={img.prompt}
               >
-                <img src={img.url} alt={img.prompt} />
+                <img src={img.url} alt={img.prompt} loading="lazy" />
               </div>
             ))}
           </div>
