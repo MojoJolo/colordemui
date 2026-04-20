@@ -77,7 +77,11 @@ function FrameSlot({ label, optional, candidates, selectedId, onSelectId, upload
               }}
               title={img.prompt}
             >
-              <img src={img.url} alt={img.prompt} />
+              {img.filename?.endsWith(".mp4") ? (
+                <video src={img.url} muted playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <img src={img.url} alt={img.prompt} />
+              )}
             </div>
           ))}
         </div>
@@ -144,7 +148,6 @@ export default function GrokVideoForm({ onGenerate, isGenerating, images }) {
     (img) =>
       img.status === "done" &&
       img.url &&
-      !img.filename?.endsWith(".mp4") &&
       !img.filename?.endsWith(".svg")
   );
 
