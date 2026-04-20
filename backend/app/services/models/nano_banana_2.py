@@ -4,7 +4,7 @@ from typing import List, Optional
 
 import replicate
 
-from app.services.models.base import ImageModel, STYLE_SUFFIX
+from app.services.models.base import ImageModel
 
 
 class NanoBanana2Model(ImageModel):
@@ -46,10 +46,8 @@ class NanoBanana2Model(ImageModel):
                 "Export it with: export REPLICATE_API_TOKEN=your_token_here"
             )
 
-        full_prompt = f"{prompt}, {STYLE_SUFFIX}"
-
         payload = {
-            "prompt": full_prompt,
+            "prompt": prompt,
             "aspect_ratio": aspect_ratio,
             "output_format": "png",
         }
