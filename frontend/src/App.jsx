@@ -4,6 +4,7 @@ import * as api from "./api";
 import FluxKleinForm from "./components/FluxKleinForm";
 import ZImageTurboForm from "./components/ZImageTurboForm";
 import PVideoForm from "./components/PVideoForm";
+import GrokVideoForm from "./components/GrokVideoForm";
 import PImageLoraForm from "./components/PImageLoraForm";
 import PImageEditForm from "./components/PImageEditForm";
 import ImageGrid from "./components/ImageGrid";
@@ -231,6 +232,13 @@ export default function App() {
           >
             P-Image Edit
           </button>
+          <button
+            className={`tab${activePage === "grok-video" ? " active" : ""}`}
+            onClick={() => setActivePage("grok-video")}
+            type="button"
+          >
+            Grok Video
+          </button>
         </nav>
       </header>
 
@@ -252,6 +260,9 @@ export default function App() {
         )}
         {activePage === "p-image-edit" && (
           <PImageEditForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
+        )}
+        {activePage === "grok-video" && (
+          <GrokVideoForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
         )}
 
         {error && <div className="error-banner">{error}</div>}
