@@ -115,7 +115,8 @@ def create_job(
             first_bytes = storage.image_file_path(src_img.filename).read_bytes()
         else:
             raw = first_frame_data.split("base64,")[-1]
-            first_bytes = normalize_image(base64.b64decode(raw))
+            raw_bytes = base64.b64decode(raw)
+            first_bytes = raw_bytes if first_frame_data.startswith("data:video/") else normalize_image(raw_bytes)
         image_id = str(uuid.uuid4())
         ref_path = storage.ref_image_path_for_image(image_id)
         ref_path.parent.mkdir(parents=True, exist_ok=True)

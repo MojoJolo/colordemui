@@ -25,16 +25,27 @@ function scaleViaCanvas(file) {
   });
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function FrameSlot({ label, optional, candidates, selectedId, onSelectId, uploadedDataUrl, onUpload, onClearUpload, disabled }) {
   const fileInputRef = useRef(null);
 
   async function handleFile(file) {
     if (!file) return;
     try {
-      const dataUrl = await scaleViaCanvas(file);
+      const dataUrl = file.type.startsWith("video/")
+        ? await readFileAsDataUrl(file)
+        : await scaleViaCanvas(file);
       onUpload(dataUrl);
     } catch (e) {
-      console.error("Failed to load image:", e);
+      console.error("Failed to load file:", e);
     }
   }
 
@@ -78,7 +89,11 @@ function FrameSlot({ label, optional, candidates, selectedId, onSelectId, upload
 
       {hasUpload ? (
         <div className="pvideo-upload-preview">
-          <img src={uploadedDataUrl} alt="uploaded" />
+          {uploadedDataUrl.startsWith("data:video/") ? (
+            <video src={uploadedDataUrl} muted playsInline controls style={{ maxWidth: "100%", maxHeight: "200px" }} />
+          ) : (
+            <img src={uploadedDataUrl} alt="uploaded" />
+          )}
           {!disabled && (
             <button type="button" className="pvideo-upload-clear" onClick={onClearUpload}>
               ✕
@@ -95,14 +110,14 @@ function FrameSlot({ label, optional, candidates, selectedId, onSelectId, upload
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,video/*"
             style={{ display: "none" }}
             onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }}
             disabled={disabled}
           />
           <span className="pvideo-upload-icon">↑</span>
           <span className="pvideo-upload-hint">
-            {hasGallery ? "Or drop a file to override gallery selection" : "Drop or click to upload"}
+            {hasGallery ? "Or drop an image or video to override gallery selection" : "Drop or click to upload image or video"}
           </span>
         </div>
       )}
