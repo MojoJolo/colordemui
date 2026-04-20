@@ -60,22 +60,23 @@ class GrokVideoModel(ImageModel):
             "aspect_ratio": aspect_ratio,
         }
         if image_bytes is not None:
-            buf = io.BytesIO(image_bytes)
             if _is_video(image_bytes):
+                buf = io.BytesIO(image_bytes)
                 buf.name = "input.mp4"
                 payload["video"] = buf
             else:
+                buf = io.BytesIO(image_bytes)
                 buf.name = "image.png"
                 payload["image"] = buf
 
         input_info = f"<video {len(image_bytes)} bytes>" if image_bytes is not None and _is_video(image_bytes) else (f"<image {len(image_bytes)} bytes>" if image_bytes is not None else "none")
         print(f"[grok-video] request: prompt={prompt!r} input={input_info} duration={min(duration, 8)}s aspect={aspect_ratio}")
 
-        # The grok model rejects Replicate Files API URLs even with correct MIME type —
-        # pass video inline as a base64 data URI to bypass file storage entirely.
+        # Grok rejects Replicate Files API URLs regardless of MIME type —
+        # pass all files inline as base64 data URIs to bypass file storage entirely.
         output = replicate.run(
             self.model_id,
             input=payload,
-            **({"file_encoding_strategy": "base64"} if "video" in payload else {}),
+            **({"file_encoding_strategy": "base64"} if ("image" in payload or "video" in payload) else {}),
         )
         return self._extract_bytes(output)
