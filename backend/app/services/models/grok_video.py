@@ -3,6 +3,7 @@ import os
 from typing import Optional
 
 import replicate
+from PIL import Image
 
 from app.services.models.base import ImageModel
 
@@ -60,13 +61,16 @@ class GrokVideoModel(ImageModel):
             "aspect_ratio": aspect_ratio,
         }
         if image_bytes is not None:
-            buf = io.BytesIO(image_bytes)
             if _is_video(image_bytes):
+                buf = io.BytesIO(image_bytes)
                 buf.name = "input.mp4"
                 payload["video"] = buf
             else:
-                buf.name = "image.png"
-                payload["image"] = buf
+                jpeg_buf = io.BytesIO()
+                Image.open(io.BytesIO(image_bytes)).convert("RGB").save(jpeg_buf, format="JPEG", quality=95)
+                jpeg_buf.seek(0)
+                jpeg_buf.name = "image.jpg"
+                payload["image"] = jpeg_buf
 
         input_info = f"<video {len(image_bytes)} bytes>" if image_bytes is not None and _is_video(image_bytes) else (f"<image {len(image_bytes)} bytes>" if image_bytes is not None else "none")
         print(f"[grok-video] request: prompt={prompt!r} input={input_info} duration={min(duration, 8)}s aspect={aspect_ratio}")
