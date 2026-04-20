@@ -7,6 +7,16 @@ import replicate
 from app.services.models.base import ImageModel
 
 
+def _is_video(data: bytes) -> bool:
+    # MP4/MOV: 'ftyp' box at offset 4
+    if len(data) >= 8 and data[4:8] == b"ftyp":
+        return True
+    # WebM
+    if data[:4] == b"\x1a\x45\xdf\xa3":
+        return True
+    return False
+
+
 class GrokVideoModel(ImageModel):
     """
     Text-to-video (and optional image-to-video) via xai/grok-imagine-video.
@@ -50,10 +60,16 @@ class GrokVideoModel(ImageModel):
             "aspect_ratio": aspect_ratio,
         }
         if image_bytes is not None:
-            payload["image"] = io.BytesIO(image_bytes)
+            buf = io.BytesIO(image_bytes)
+            if _is_video(image_bytes):
+                buf.name = "input.mp4"
+                payload["video"] = buf
+            else:
+                buf.name = "image.png"
+                payload["image"] = buf
 
-        image_info = f"<{len(image_bytes)} bytes>" if image_bytes is not None else "none"
-        print(f"[grok-video] request: prompt={prompt!r} image={image_info} duration={min(duration, 8)}s aspect={aspect_ratio}")
+        input_info = f"<video {len(image_bytes)} bytes>" if image_bytes is not None and _is_video(image_bytes) else (f"<image {len(image_bytes)} bytes>" if image_bytes is not None else "none")
+        print(f"[grok-video] request: prompt={prompt!r} input={input_info} duration={min(duration, 8)}s aspect={aspect_ratio}")
 
         output = replicate.run(self.model_id, input=payload)
         return self._extract_bytes(output)

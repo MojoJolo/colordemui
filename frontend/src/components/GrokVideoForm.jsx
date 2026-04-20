@@ -25,31 +25,12 @@ function scaleViaCanvas(file) {
   });
 }
 
-function extractVideoFrame(file) {
+function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    video.muted = true;
-    video.playsInline = true;
-    video.src = url;
-    video.onloadeddata = () => { video.currentTime = 0; };
-    video.onseeked = () => {
-      let w = video.videoWidth;
-      let h = video.videoHeight;
-      const total = w * h;
-      if (total > MAX_PIXELS) {
-        const s = Math.sqrt(MAX_PIXELS / total);
-        w = Math.round(w * s);
-        h = Math.round(h * s);
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext("2d").drawImage(video, 0, 0, w, h);
-      URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL("image/png"));
-    };
-    video.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Failed to load video")); };
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
   });
 }
 
@@ -60,7 +41,7 @@ function FrameSlot({ label, optional, candidates, selectedId, onSelectId, upload
     if (!file) return;
     try {
       const dataUrl = file.type.startsWith("video/")
-        ? await extractVideoFrame(file)
+        ? await readFileAsDataUrl(file)
         : await scaleViaCanvas(file);
       onUpload(dataUrl);
     } catch (e) {
@@ -108,7 +89,11 @@ function FrameSlot({ label, optional, candidates, selectedId, onSelectId, upload
 
       {hasUpload ? (
         <div className="pvideo-upload-preview">
-          <img src={uploadedDataUrl} alt="uploaded" />
+          {uploadedDataUrl.startsWith("data:video/") ? (
+            <video src={uploadedDataUrl} muted playsInline controls style={{ maxWidth: "100%", maxHeight: "200px" }} />
+          ) : (
+            <img src={uploadedDataUrl} alt="uploaded" />
+          )}
           {!disabled && (
             <button type="button" className="pvideo-upload-clear" onClick={onClearUpload}>
               ✕
