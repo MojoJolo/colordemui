@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 const ASPECT_RATIOS = [
   { value: "9:16",  label: "9:16",  desc: "Reels" },
@@ -10,20 +10,144 @@ const ASPECT_RATIOS = [
   { value: "2:3",   label: "2:3",   desc: "Story" },
 ];
 
-export default function NanoBanana2Form({ onGenerate, isGenerating }) {
+const MAX_PIXELS = 1_000_000;
+const MAX_IMAGES = 5;
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function scaleViaCanvas(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const total = img.width * img.height;
+      let w = img.width;
+      let h = img.height;
+      if (total > MAX_PIXELS) {
+        const s = Math.sqrt(MAX_PIXELS / total);
+        w = Math.round(w * s);
+        h = Math.round(h * s);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve({ dataUrl: canvas.toDataURL("image/png"), w, h });
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+function scaleFromUrl(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const total = img.width * img.height;
+      let w = img.width;
+      let h = img.height;
+      if (total > MAX_PIXELS) {
+        const s = Math.sqrt(MAX_PIXELS / total);
+        w = Math.round(w * s);
+        h = Math.round(h * s);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve({ dataUrl: canvas.toDataURL("image/png"), w, h });
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+function isHeic(file) {
+  return (
+    file.type === "image/heic" ||
+    file.type === "image/heif" ||
+    /\.hei[cf]$/i.test(file.name)
+  );
+}
+
+export default function NanoBanana2Form({ onGenerate, isGenerating, images = [] }) {
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [seed, setSeed] = useState("");
   const [numOutputs, setNumOutputs] = useState(1);
+  const [refImages, setRefImages] = useState([]);
+  const [uploadError, setUploadError] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const candidates = images.filter(
+    (img) => img.status === "done" && img.url && !img.filename?.endsWith(".mp4")
+  );
+
+  const addedGalleryIds = new Set(
+    refImages.filter((r) => r.galleryId).map((r) => r.galleryId)
+  );
+
+  const atLimit = refImages.length >= MAX_IMAGES;
+
+  async function handleGalleryToggle(img) {
+    if (addedGalleryIds.has(img.image_id)) {
+      setRefImages((prev) => prev.filter((r) => r.galleryId !== img.image_id));
+      return;
+    }
+    if (atLimit) return;
+    try {
+      const { dataUrl, w, h } = await scaleFromUrl(img.url);
+      const label = img.prompt.length > 40 ? img.prompt.slice(0, 40) + "…" : img.prompt;
+      setRefImages((prev) => [...prev, { dataUrl, w, h, label, galleryId: img.image_id }]);
+    } catch (e) {
+      console.error("Failed to load gallery image:", e);
+    }
+  }
+
+  async function handleImageFiles(files) {
+    if (!files || files.length === 0) return;
+    setUploadError(null);
+    const slots = MAX_IMAGES - refImages.length;
+    if (slots <= 0) return;
+    try {
+      const results = await Promise.all(
+        Array.from(files).slice(0, slots).map(async (file) => {
+          if (isHeic(file)) {
+            const dataUrl = await readFileAsDataUrl(file);
+            return { dataUrl, w: null, h: null, label: file.name };
+          }
+          const result = await scaleViaCanvas(file);
+          return { ...result, label: `${result.w} × ${result.h}px` };
+        })
+      );
+      setRefImages((prev) => [...prev, ...results]);
+    } catch (e) {
+      console.error("Image load failed:", e);
+      setUploadError("Could not load image. Please try another file.");
+    }
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    handleImageFiles(e.dataTransfer.files);
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!prompt.trim()) return;
     const parsedSeed = seed.trim() !== "" ? parseInt(seed, 10) : null;
+    const imageData = refImages.length > 0 ? refImages.map((img) => img.dataUrl) : null;
     onGenerate(
       [prompt.trim()],
       "nano-banana-2",
-      null,
+      imageData,
       { aspectRatio, seed: parsedSeed, numOutputs }
     );
   }
@@ -36,6 +160,93 @@ export default function NanoBanana2Form({ onGenerate, isGenerating }) {
         <span className="klein-model-badge">nano-banana-2</span>
         <span className="klein-model-desc">Text-to-image · Gemini 3.1 Flash</span>
       </div>
+
+      {/* Gallery picker */}
+      {candidates.length > 0 && (
+        <>
+          <label className="prompt-label">
+            From Gallery{" "}
+            <span className="pvideo-optional">(optional — click to add as reference)</span>
+          </label>
+          <div className="pvideo-picker">
+            {candidates.map((img) => (
+              <div
+                key={img.image_id}
+                className={`pvideo-thumb${addedGalleryIds.has(img.image_id) ? " selected" : ""}${atLimit && !addedGalleryIds.has(img.image_id) ? " pvideo-picker-dim" : ""}`}
+                onClick={() => !isGenerating && handleGalleryToggle(img)}
+                title={img.prompt}
+              >
+                <img src={img.url} alt={img.prompt} />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Upload zone */}
+      <label className="prompt-label">
+        Reference Images{" "}
+        <span className="pvideo-optional">
+          (optional — {refImages.length}/{MAX_IMAGES})
+        </span>
+      </label>
+      <div
+        className={`image-upload-zone ${refImages.length > 0 ? "has-image" : ""}`}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleDrop}
+        onClick={() => !isGenerating && !atLimit && fileInputRef.current?.click()}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.heic,.heif"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => { handleImageFiles(e.target.files); e.target.value = ""; }}
+          disabled={isGenerating || atLimit}
+        />
+        {refImages.length > 0 ? (
+          <div className="upload-preview-grid">
+            {refImages.map((img, i) => (
+              <div key={i} className="upload-preview">
+                {img.w ? (
+                  <img src={img.dataUrl} alt="Reference" />
+                ) : (
+                  <div className="upload-heic-thumb">HEIC</div>
+                )}
+                <div className="upload-preview-info">
+                  <span>Ref {i + 1} · {img.label}</span>
+                  {!isGenerating && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRefImages((prev) => prev.filter((_, j) => j !== i));
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {!isGenerating && !atLimit && (
+              <div className="upload-add-more">
+                <span className="upload-icon">+</span>
+                <span>Add reference</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="upload-empty">
+            <span className="upload-icon">↑</span>
+            <span>Drop images or click to upload</span>
+            <span className="upload-hint">Optional · up to 5 reference images</span>
+          </div>
+        )}
+      </div>
+      {uploadError && <p className="upload-error">{uploadError}</p>}
 
       <label htmlFor="nb2-prompt" className="prompt-label">Prompt</label>
       <textarea
