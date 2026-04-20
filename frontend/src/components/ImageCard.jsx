@@ -10,41 +10,82 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
   const isPending = status === "pending";
 
   function handleCopyPrompt() {
+    const text = prompt ?? "";
     const markCopied = () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     };
 
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(prompt).then(markCopied).catch(() => {
-        fallbackCopy(prompt, markCopied);
+    // Try legacy execCommand first so the user-gesture context is preserved.
+    // If that fails (e.g., blocked by browser), fall back to the async
+    // Clipboard API, which also works in secure contexts where execCommand is
+    // disabled.
+    if (legacyCopy(text)) {
+      markCopied();
+      return;
+    }
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(markCopied).catch(() => {
+        // Last resort: try legacy once more in case focus was the issue.
+        if (legacyCopy(text)) markCopied();
       });
-    } else {
-      fallbackCopy(prompt, markCopied);
     }
   }
 
-  function fallbackCopy(text, onSuccess) {
+  function legacyCopy(text) {
+    if (typeof document === "undefined" || !document.queryCommandSupported) {
+      return false;
+    }
     const el = document.createElement("textarea");
     el.value = text;
-    el.contentEditable = "true";
-    el.readOnly = false;
-    el.style.cssText = "position:absolute;left:-9999px;top:-9999px";
+    el.setAttribute("readonly", "");
+    // Keep on-screen but invisible so mobile browsers (iOS, Android) will
+    // still allow selection. Off-screen elements are silently rejected by
+    // some engines.
+    el.style.position = "fixed";
+    el.style.top = "0";
+    el.style.left = "0";
+    el.style.width = "1px";
+    el.style.height = "1px";
+    el.style.padding = "0";
+    el.style.border = "0";
+    el.style.outline = "0";
+    el.style.boxShadow = "none";
+    el.style.background = "transparent";
+    el.style.opacity = "0";
+    // Avoid iOS zoom on focus.
+    el.style.fontSize = "16px";
     document.body.appendChild(el);
-    // iOS Safari requires a range/selection instead of el.select()
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    el.setSelectionRange(0, text.length);
+
+    const prevActive = document.activeElement;
+    let ok = false;
     try {
-      document.execCommand("copy");
-      onSuccess();
+      if (/ipad|iphone|ipod/i.test(navigator.userAgent)) {
+        // iOS Safari needs a range + selection, not el.select().
+        el.contentEditable = "true";
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        el.setSelectionRange(0, text.length);
+      } else {
+        el.focus();
+        el.select();
+      }
+      ok = document.execCommand("copy");
     } catch (_) {
-      // copy not supported
+      ok = false;
     }
     document.body.removeChild(el);
+    if (prevActive && typeof prevActive.focus === "function") {
+      try {
+        prevActive.focus();
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    return ok;
   }
 
   return (
