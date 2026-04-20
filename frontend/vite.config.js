@@ -9,6 +9,7 @@ export default defineConfig({
     // Proxy API and static-file requests to the FastAPI backend so the
     // frontend never has to hard-code a port or deal with CORS in dev.
     proxy: {
+      "/auth": apiProxyTarget,
       "/jobs": apiProxyTarget,
       "/images": apiProxyTarget,
       "/models": apiProxyTarget,
