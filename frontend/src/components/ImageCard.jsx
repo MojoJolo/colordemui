@@ -11,6 +11,7 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
+          video.preload = "metadata";
           video.src = url;
           observer.disconnect();
         }
@@ -123,7 +124,6 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
               ref={videoRef}
               muted
               playsInline
-              preload="none"
               className="expandable"
               onClick={() => onExpand && onExpand(image)}
             />
