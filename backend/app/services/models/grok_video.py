@@ -62,11 +62,8 @@ class GrokVideoModel(ImageModel):
         if image_bytes is not None:
             buf = io.BytesIO(image_bytes)
             if _is_video(image_bytes):
-                # Upload with explicit MIME type — mimetypes.guess_type can return None on
-                # minimal Linux systems, causing the file to land as application/octet-stream,
-                # which the grok model rejects even though the URL ends in .mp4.
-                uploaded = replicate.files.create(buf, filename="input.mp4", content_type="video/mp4")
-                payload["video"] = uploaded.urls["get"]
+                buf.name = "input.mp4"
+                payload["video"] = buf
             else:
                 buf.name = "image.png"
                 payload["image"] = buf
@@ -74,5 +71,11 @@ class GrokVideoModel(ImageModel):
         input_info = f"<video {len(image_bytes)} bytes>" if image_bytes is not None and _is_video(image_bytes) else (f"<image {len(image_bytes)} bytes>" if image_bytes is not None else "none")
         print(f"[grok-video] request: prompt={prompt!r} input={input_info} duration={min(duration, 8)}s aspect={aspect_ratio}")
 
-        output = replicate.run(self.model_id, input=payload)
+        # The grok model rejects Replicate Files API URLs even with correct MIME type —
+        # pass video inline as a base64 data URI to bypass file storage entirely.
+        output = replicate.run(
+            self.model_id,
+            input=payload,
+            **({"file_encoding_strategy": "base64"} if "video" in payload else {}),
+        )
         return self._extract_bytes(output)
