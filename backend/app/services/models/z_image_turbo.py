@@ -6,11 +6,20 @@ import replicate
 
 from app.services.models.base import ImageModel
 
+_ASPECT_DIMS: dict[str, tuple[int, int]] = {
+    "9:16": (768, 1360),
+    "1:1":  (1088, 1088),
+    "4:5":  (1088, 1360),
+    "16:9": (1360, 768),
+    "3:4":  (1024, 1360),
+    "2:3":  (896, 1344),
+}
+
 
 class ZImageTurboModel(ImageModel):
     """
     Text-to-image via prunaai/z-image-turbo.
-    Outputs at 1088×1360 (Instagram portrait 4:5) with a random seed each call.
+    Supports configurable aspect ratios; defaults to 4:5 (1088×1360).
     """
 
     @property
@@ -25,7 +34,11 @@ class ZImageTurboModel(ImageModel):
     def accepts_image(self) -> bool:
         return False
 
-    def generate(self, prompt: str, image_bytes: Optional[bytes] = None) -> bytes:
+    @property
+    def supports_aspect_ratio(self) -> bool:
+        return True
+
+    def generate(self, prompt: str, image_bytes: Optional[bytes] = None, aspect_ratio: str = "4:5") -> bytes:
         if not os.environ.get("REPLICATE_API_TOKEN"):
             raise ValueError(
                 "REPLICATE_API_TOKEN is not set. "
@@ -33,15 +46,16 @@ class ZImageTurboModel(ImageModel):
             )
 
         seed = random.randint(0, 2**32 - 1)
+        width, height = _ASPECT_DIMS.get(aspect_ratio, (1088, 1360))
 
         payload = {
             "prompt": prompt,
-            "width": 1088,
-            "height": 1360,
+            "width": width,
+            "height": height,
             "seed": seed,
         }
 
-        print(f"[z-image-turbo] request: prompt={prompt!r} seed={seed}")
+        print(f"[z-image-turbo] request: prompt={prompt!r} aspect_ratio={aspect_ratio} ({width}×{height}) seed={seed}")
 
         output = replicate.run(self.model_id, input=payload)
         return self._extract_bytes(output)
