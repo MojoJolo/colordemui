@@ -2,8 +2,6 @@ import io
 import os
 from typing import Optional
 
-import replicate
-
 from app.services.models.base import ImageModel
 
 
@@ -60,5 +58,5 @@ class PVideoModel(ImageModel):
         last_info = f"<{len(last_frame_bytes)} bytes>" if last_frame_bytes is not None else "none"
         print(f"[p-video] request: prompt={prompt!r} image={image_info} last_frame={last_info}")
 
-        output = replicate.run(self.model_id, input=payload)
+        output = self._replicate_run(self.model_id, input=payload)
         return self._extract_bytes(output)

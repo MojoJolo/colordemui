@@ -3,8 +3,6 @@ import os
 import random
 from typing import List, Optional
 
-import replicate
-
 from app.services.models.base import ImageModel
 
 
@@ -69,7 +67,7 @@ class FluxKlein9bModel(ImageModel):
         }
         print(f"[flux-2-klein-9b] request: {loggable}")
 
-        output = replicate.run(self.model_id, input=payload)
+        output = self._replicate_run(self.model_id, input=payload)
         return self._extract_bytes(output)
 
     def generate_multi(

@@ -1,8 +1,6 @@
 import os
 from typing import Optional
 
-import replicate
-
 from app.services.models.base import ImageModel
 
 
@@ -60,5 +58,5 @@ class PImageLoraModel(ImageModel):
 
         print(f"[p-image-lora] prompt={prompt!r} lora={lora_weights!r} scale={lora_scale} seed={seed}")
 
-        output = replicate.run(self.model_id, input=payload)
+        output = self._replicate_run(self.model_id, input=payload)
         return self._extract_bytes(output)

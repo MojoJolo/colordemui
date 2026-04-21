@@ -1,6 +1,24 @@
-import requests
+import threading
+import time
 from abc import ABC, abstractmethod
 from typing import Optional
+
+import replicate
+import requests
+
+_rate_limit_lock = threading.Lock()
+_last_call_time: float = 0.0
+_CALL_DELAY_SECONDS: float = 5.0
+
+
+def _throttled_replicate_run(model_id: str, **kwargs):
+    global _last_call_time
+    with _rate_limit_lock:
+        elapsed = time.time() - _last_call_time
+        if elapsed < _CALL_DELAY_SECONDS:
+            time.sleep(_CALL_DELAY_SECONDS - elapsed)
+        _last_call_time = time.time()
+    return replicate.run(model_id, **kwargs)
 
 # ---------------------------------------------------------------------------
 # Shared style descriptors — used by all models.
@@ -100,6 +118,10 @@ class ImageModel(ABC):
     ) -> list:
         """Run the model with multiple shared reference images and return a list of image bytes."""
         raise NotImplementedError("This model does not support generate_multi()")
+
+    @staticmethod
+    def _replicate_run(model_id: str, **kwargs):
+        return _throttled_replicate_run(model_id, **kwargs)
 
     def _extract_bytes(self, output) -> bytes:
         """Normalise the various output shapes the Replicate SDK can return."""

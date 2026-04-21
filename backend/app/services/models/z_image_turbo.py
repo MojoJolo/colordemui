@@ -2,8 +2,6 @@ import os
 import random
 from typing import Optional
 
-import replicate
-
 from app.services.models.base import ImageModel
 
 
@@ -43,5 +41,5 @@ class ZImageTurboModel(ImageModel):
 
         print(f"[z-image-turbo] request: prompt={prompt!r} seed={seed}")
 
-        output = replicate.run(self.model_id, input=payload)
+        output = self._replicate_run(self.model_id, input=payload)
         return self._extract_bytes(output)

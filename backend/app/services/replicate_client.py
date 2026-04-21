@@ -1,7 +1,8 @@
 import os
 
-import replicate
 import requests
+
+from app.services.models.base import _throttled_replicate_run
 
 
 def generate(prompt: str) -> bytes:
@@ -43,7 +44,7 @@ def generate(prompt: str) -> bytes:
         "book, open book, page border, frame, border"
     )
 
-    output = replicate.run(
+    output = _throttled_replicate_run(
         "recraft-ai/recraft-v3-svg",
         input={
             "prompt": full_prompt,

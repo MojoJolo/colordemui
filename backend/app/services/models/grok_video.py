@@ -2,8 +2,6 @@ import io
 import os
 from typing import Optional
 
-import replicate
-
 from app.services.models.base import ImageModel
 
 
@@ -74,7 +72,7 @@ class GrokVideoModel(ImageModel):
 
         # Grok rejects Replicate Files API URLs regardless of MIME type —
         # pass all files inline as base64 data URIs to bypass file storage entirely.
-        output = replicate.run(
+        output = self._replicate_run(
             self.model_id,
             input=payload,
             **({"file_encoding_strategy": "base64"} if ("image" in payload or "video" in payload) else {}),
