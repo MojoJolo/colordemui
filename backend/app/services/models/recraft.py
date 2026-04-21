@@ -1,8 +1,6 @@
 import os
 from typing import Optional
 
-import replicate
-
 from app.services.models.base import ImageModel, STYLE_SUFFIX, NEGATIVE_PROMPT
 
 
@@ -33,7 +31,7 @@ class RecraftSVGModel(ImageModel):
 
         full_prompt = f"subject: {prompt}, styles: {STYLE_SUFFIX}"
 
-        output = replicate.run(
+        output = self._replicate_run(
             self.model_id,
             input={
                 "prompt": full_prompt,

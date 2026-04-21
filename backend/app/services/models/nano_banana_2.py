@@ -2,8 +2,6 @@ import io
 import os
 from typing import List, Optional
 
-import replicate
-
 from app.services.models.base import ImageModel
 
 
@@ -61,5 +59,5 @@ class NanoBanana2Model(ImageModel):
             f"images={len(ref_images)}"
         )
 
-        output = replicate.run(self.model_id, input=payload)
+        output = self._replicate_run(self.model_id, input=payload)
         return self._extract_bytes(output)

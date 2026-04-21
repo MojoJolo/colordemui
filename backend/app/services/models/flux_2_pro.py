@@ -2,8 +2,6 @@ import io
 import os
 from typing import Optional
 
-import replicate
-
 from app.services.models.base import ImageModel
 from app.utils import whiten_background
 
@@ -59,7 +57,7 @@ class FluxProModel(ImageModel):
         }
         print(f"[flux-2-pro] request: {loggable}")
 
-        output = replicate.run(self.model_id, input=payload)
+        output = self._replicate_run(self.model_id, input=payload)
 
         image_bytes = self._extract_bytes(output)
         return whiten_background(image_bytes)

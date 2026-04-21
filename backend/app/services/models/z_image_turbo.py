@@ -2,8 +2,6 @@ import os
 import random
 from typing import Optional
 
-import replicate
-
 from app.services.models.base import ImageModel
 
 _ASPECT_DIMS: dict[str, tuple[int, int]] = {
@@ -57,5 +55,5 @@ class ZImageTurboModel(ImageModel):
 
         print(f"[z-image-turbo] request: prompt={prompt!r} aspect_ratio={aspect_ratio} ({width}×{height}) seed={seed}")
 
-        output = replicate.run(self.model_id, input=payload)
+        output = self._replicate_run(self.model_id, input=payload)
         return self._extract_bytes(output)
