@@ -309,6 +309,9 @@ async def run_job(job_id: str) -> None:
                     job.prompt_upsampling,
                 )
                 image_bytes: bytes = await loop.run_in_executor(_executor, fn)
+            elif model.supports_aspect_ratio:
+                fn = functools.partial(model.generate, image.prompt, ref_image_bytes, job.aspect_ratio)
+                image_bytes: bytes = await loop.run_in_executor(_executor, fn)
             else:
                 image_bytes: bytes = await loop.run_in_executor(
                     _executor,
