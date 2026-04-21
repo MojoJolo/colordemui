@@ -13,12 +13,13 @@ export default function ZImageTurboForm({ onGenerate, isGenerating }) {
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState("4:5");
 
+  const parsedPrompts = prompt.split("=====").map((p) => p.trim()).filter(Boolean);
+
   function handleSubmit(e) {
     e.preventDefault();
-    if (!prompt.trim()) return;
-    const text = prompt.trim();
+    if (parsedPrompts.length === 0) return;
     setPrompt("");
-    onGenerate([text], "z-image-turbo", null, { aspectRatio });
+    onGenerate(parsedPrompts, "z-image-turbo", null, { aspectRatio });
   }
 
   return (
@@ -28,13 +29,20 @@ export default function ZImageTurboForm({ onGenerate, isGenerating }) {
         <span className="klein-model-desc">Fast text-to-image</span>
       </div>
 
-      <label htmlFor="z-prompt" className="prompt-label">Prompt</label>
+      <label htmlFor="z-prompt" className="prompt-label">
+        Prompt
+        {parsedPrompts.length > 1 && (
+          <span className="klein-prompt-count">
+            {parsedPrompts.length} prompts · {parsedPrompts.length} images total
+          </span>
+        )}
+      </label>
       <textarea
         id="z-prompt"
         className="prompt-textarea"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Describe the image you want to generate…"
+        placeholder={"Describe the image you want to generate…\n\n=====\n\nAnother prompt (optional)"}
         rows={4}
         disabled={isGenerating}
       />
@@ -58,9 +66,14 @@ export default function ZImageTurboForm({ onGenerate, isGenerating }) {
       <button
         type="submit"
         className="btn btn-primary"
-        disabled={isGenerating || !prompt.trim()}
+        disabled={isGenerating || parsedPrompts.length === 0}
       >
-        {isGenerating ? "Generating…" : "Generate"}
+        {isGenerating
+          ? "Generating…"
+          : parsedPrompts.length > 1
+            ? `Generate ${parsedPrompts.length} Images`
+            : "Generate"
+        }
       </button>
     </form>
   );
