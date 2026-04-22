@@ -87,6 +87,7 @@ export default function WorkflowConfigTab({ onExpand }) {
         if (run.status === "done" || run.status === "failed") {
           setActiveRunId(null);
           api.getWorkflowImages(selectedId).then(setWfImages).catch(() => {});
+          api.listWorkflowRuns(selectedId).then(setRuns).catch(() => {});
         }
       } catch (e) {
         // keep polling
@@ -676,7 +677,7 @@ export default function WorkflowConfigTab({ onExpand }) {
             <span className="wf-section-title">Run History</span>
           </div>
           <div className="wf-run-list">
-            {runs.slice(0, 10).map((run) => (
+            {runs.map((run) => (
               <div key={run.run_id} className="wf-run-item">
                 <div
                   className="wf-run-summary"
