@@ -85,6 +85,11 @@ class ImageModel(ABC):
         return False
 
     @property
+    def requires_image(self) -> bool:
+        """Whether an image input is mandatory (not just optional)."""
+        return False
+
+    @property
     def is_multi_reference(self) -> bool:
         """True if this model takes all image_data as shared references and returns N outputs."""
         return False

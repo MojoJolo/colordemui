@@ -40,7 +40,10 @@ def list_models() -> List[dict]:
         {
             "id": name,
             "accepts_image": model.accepts_image,
+            "requires_image": model.requires_image,
             "is_multi_reference": model.is_multi_reference,
+            "supports_aspect_ratio": model.supports_aspect_ratio,
+            "supports_duration": model.supports_duration,
             "output_extension": model.output_extension,
         }
         for name, model in _REGISTRY.items()

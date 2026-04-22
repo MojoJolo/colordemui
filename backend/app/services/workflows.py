@@ -11,6 +11,21 @@ from app.services.storage import GENERATED_DIR
 from app.utils import utcnow
 
 
+def _load_images_by_ids(image_ids: List[str]) -> List[bytes]:
+    """Load image bytes from disk for the given image IDs."""
+    from app.services import jobs as job_service
+    all_images = job_service.get_all_images()
+    id_to_filename = {img.image_id: img.filename for img in all_images if img.filename}
+    result = []
+    for image_id in image_ids:
+        filename = id_to_filename.get(image_id)
+        if filename:
+            path = GENERATED_DIR / filename
+            if path.exists():
+                result.append(path.read_bytes())
+    return result
+
+
 def _derive_slug(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
     return slug or "workflow"
@@ -105,6 +120,8 @@ def _build_step(s) -> WorkflowStep:
         model=s.model,
         num_outputs=s.num_outputs,
         prompt_template=s.prompt_template,
+        aspect_ratio=getattr(s, "aspect_ratio", "9:16"),
+        initial_image_ids=getattr(s, "initial_image_ids", []),
     )
 
 
@@ -144,8 +161,14 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
         produced_bytes: List[bytes] = []
         try:
             for j in range(step.num_outputs):
-                if model.is_multi_reference and prev_image_bytes:
-                    img_bytes = model.generate_one(prompt, prev_image_bytes, seed=None, aspect_ratio="1:1")
+                if model.is_multi_reference:
+                    ref_images = prev_image_bytes if prev_image_bytes else _load_images_by_ids(step.initial_image_ids)
+                    if not ref_images:
+                        raise ValueError(
+                            f"Step {i + 1} uses '{step.model}' which requires reference images, "
+                            "but none are available from the previous step or configured initial images."
+                        )
+                    img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
                 elif prev_image_bytes and model.accepts_image:
                     ref = prev_image_bytes[j % len(prev_image_bytes)]
                     img_bytes = model.generate(prompt, ref)

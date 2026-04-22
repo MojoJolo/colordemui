@@ -56,6 +56,8 @@ class WorkflowStepRequest(BaseModel):
     model: str
     num_outputs: int = 1
     prompt_template: str = ""
+    aspect_ratio: str = "9:16"
+    initial_image_ids: List[str] = []
 
 
 class WorkflowRequest(BaseModel):
@@ -72,6 +74,8 @@ class WorkflowStepResponse(BaseModel):
     model: str
     num_outputs: int
     prompt_template: str
+    aspect_ratio: str = "9:16"
+    initial_image_ids: List[str] = []
 
 
 class WorkflowResponse(BaseModel):

@@ -138,7 +138,7 @@ async def create_job(request: CreateJobRequest, background_tasks: BackgroundTask
         raise HTTPException(status_code=400, detail=str(exc))
 
     has_image_input = bool(request.image_data) or bool(request.selected_image_id)
-    if model.accepts_image and not has_image_input:
+    if model.requires_image and not has_image_input:
         raise HTTPException(
             status_code=400,
             detail=f"Model '{request.model}' requires an image input.",
@@ -253,6 +253,8 @@ def _wf_to_response(wf) -> WorkflowResponse:
             model=s.model,
             num_outputs=s.num_outputs,
             prompt_template=s.prompt_template,
+            aspect_ratio=s.aspect_ratio,
+            initial_image_ids=s.initial_image_ids,
         ) for s in wf.steps],
         slot_lists=wf.slot_lists,
         schedule_value=wf.schedule_value,

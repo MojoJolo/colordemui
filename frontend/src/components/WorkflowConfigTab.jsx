@@ -7,6 +7,8 @@ const DEFAULT_STEP = () => ({
   model: "recraft-v3-svg",
   num_outputs: 1,
   prompt_template: "",
+  aspect_ratio: "9:16",
+  initial_image_ids: [],
 });
 
 const DEFAULT_WORKFLOW = () => ({
@@ -37,6 +39,7 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [draft, setDraft] = useState(null);
   const [isNew, setIsNew] = useState(false);
   const [models, setModels] = useState([]);
+  const [allImages, setAllImages] = useState([]);
   const [runs, setRuns] = useState([]);
   const [wfImages, setWfImages] = useState([]);
   const [activeRunId, setActiveRunId] = useState(null);
@@ -46,10 +49,11 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [expandedRunId, setExpandedRunId] = useState(null);
   const pollRef = useRef(null);
 
-  // Load models + workflows on mount
+  // Load models + workflows + all images on mount
   useEffect(() => {
     api.listModels().then(setModels).catch(() => {});
     api.listWorkflows().then(setWorkflows).catch(() => {});
+    api.getAllImages().then(setAllImages).catch(() => {});
   }, []);
 
   // Load runs + images when a workflow is selected
@@ -93,7 +97,11 @@ export default function WorkflowConfigTab({ onExpand }) {
     setSelectedId(wf.workflow_id);
     setDraft({
       name: wf.name,
-      steps: wf.steps.map((s) => ({ ...s })),
+      steps: wf.steps.map((s) => ({
+        ...s,
+        aspect_ratio: s.aspect_ratio || "9:16",
+        initial_image_ids: s.initial_image_ids || [],
+      })),
       slot_lists: { ...wf.slot_lists },
       schedule_value: wf.schedule_value,
       schedule_unit: wf.schedule_unit,
@@ -205,6 +213,8 @@ export default function WorkflowConfigTab({ onExpand }) {
           model: s.model,
           num_outputs: s.num_outputs,
           prompt_template: s.prompt_template,
+          aspect_ratio: s.aspect_ratio || "9:16",
+          initial_image_ids: s.initial_image_ids || [],
         })),
         slot_lists: draft.slot_lists,
         schedule_value: draft.schedule_value,
@@ -222,7 +232,11 @@ export default function WorkflowConfigTab({ onExpand }) {
       setSelectedId(saved.workflow_id);
       setDraft({
         name: saved.name,
-        steps: saved.steps.map((s) => ({ ...s })),
+        steps: saved.steps.map((s) => ({
+          ...s,
+          aspect_ratio: s.aspect_ratio || "9:16",
+          initial_image_ids: s.initial_image_ids || [],
+        })),
         slot_lists: { ...saved.slot_lists },
         schedule_value: saved.schedule_value,
         schedule_unit: saved.schedule_unit,
@@ -428,6 +442,8 @@ export default function WorkflowConfigTab({ onExpand }) {
                 const modelInfo = models.find((m) => m.id === step.model);
                 const isChained = i > 0;
                 const chainWarning = isChained && modelInfo && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
+                const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio;
+                const showRefPicker = modelInfo && modelInfo.is_multi_reference;
                 return (
                   <div key={i} className="wf-step-card">
                     <div className="wf-step-header">
@@ -485,11 +501,61 @@ export default function WorkflowConfigTab({ onExpand }) {
                             onChange={(e) => updateStep(i, "num_outputs", Math.min(4, Math.max(1, parseInt(e.target.value) || 1)))}
                           />
                         </div>
+                        {showAspectRatio && (
+                          <div className="wf-field">
+                            <label className="prompt-label">Aspect Ratio</label>
+                            <select
+                              className="klein-input"
+                              value={step.aspect_ratio || "9:16"}
+                              onChange={(e) => updateStep(i, "aspect_ratio", e.target.value)}
+                            >
+                              {["9:16", "1:1", "4:5", "16:9", "3:4", "2:3"].map((r) => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
 
                       {chainWarning && (
                         <div className="wf-warning">
                           This model does not accept image input — previous step's output will not be passed as reference.
+                        </div>
+                      )}
+
+                      {showRefPicker && (
+                        <div className="wf-ref-picker">
+                          <label className="prompt-label">
+                            Reference Images
+                            {isChained && (
+                              <span className="wf-ref-hint"> — previous step's output will be used; select below as fallback for Step 1</span>
+                            )}
+                          </label>
+                          {allImages.filter((img) => img.filename && img.status === "done").length === 0 ? (
+                            <p className="wf-hint">No generated images yet. Run some generations first.</p>
+                          ) : (
+                            <div className="wf-ref-grid">
+                              {allImages.filter((img) => img.filename && img.status === "done").map((img) => {
+                                const selected = (step.initial_image_ids || []).includes(img.image_id);
+                                return (
+                                  <div
+                                    key={img.image_id}
+                                    className={`wf-ref-thumb${selected ? " selected" : ""}`}
+                                    onClick={() => {
+                                      const ids = step.initial_image_ids || [];
+                                      updateStep(i, "initial_image_ids", selected
+                                        ? ids.filter((id) => id !== img.image_id)
+                                        : [...ids, img.image_id]
+                                      );
+                                    }}
+                                  >
+                                    <img src={img.url} alt="" />
+                                    {selected && <span className="wf-ref-check">✓</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       )}
 
