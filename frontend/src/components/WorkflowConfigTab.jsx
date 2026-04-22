@@ -563,31 +563,39 @@ export default function WorkflowConfigTab({ onExpand }) {
                               <span className="wf-ref-hint"> — previous step's output will be used; select below as fallback for Step 1</span>
                             )}
                           </label>
-                          {allImages.filter((img) => img.filename && img.status === "done").length === 0 ? (
-                            <p className="wf-hint">No generated images yet. Run some generations first.</p>
-                          ) : (
-                            <div className="wf-ref-grid">
-                              {allImages.filter((img) => img.filename && img.status === "done").map((img) => {
-                                const selected = (step.initial_image_ids || []).includes(img.image_id);
-                                return (
-                                  <div
-                                    key={img.image_id}
-                                    className={`wf-ref-thumb${selected ? " selected" : ""}`}
-                                    onClick={() => {
-                                      const ids = step.initial_image_ids || [];
-                                      updateStep(i, "initial_image_ids", selected
-                                        ? ids.filter((id) => id !== img.image_id)
-                                        : [...ids, img.image_id]
-                                      );
-                                    }}
-                                  >
-                                    <img src={img.url} alt="" />
-                                    {selected && <span className="wf-ref-check">✓</span>}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
+                          {(() => {
+                            const refImages = allImages
+                              .filter((img) => img.filename && img.status === "done"
+                                && !img.filename.endsWith(".mp4")
+                                && !img.filename.endsWith(".svg"))
+                              .slice(-40)
+                              .reverse();
+                            return refImages.length === 0 ? (
+                              <p className="wf-hint">No generated images yet. Run some generations first.</p>
+                            ) : (
+                              <div className="wf-ref-grid">
+                                {refImages.map((img) => {
+                                  const selected = (step.initial_image_ids || []).includes(img.image_id);
+                                  return (
+                                    <div
+                                      key={img.image_id}
+                                      className={`wf-ref-thumb${selected ? " selected" : ""}`}
+                                      onClick={() => {
+                                        const ids = step.initial_image_ids || [];
+                                        updateStep(i, "initial_image_ids", selected
+                                          ? ids.filter((id) => id !== img.image_id)
+                                          : [...ids, img.image_id]
+                                        );
+                                      }}
+                                    >
+                                      <img src={img.url} alt="" />
+                                      {selected && <span className="wf-ref-check">✓</span>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
 
