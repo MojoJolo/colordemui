@@ -140,3 +140,63 @@ export function getLoraZipUrl(triggerWord = "") {
   const qs = params.toString();
   return `/images/lora-zip${qs ? `?${qs}` : ""}`;
 }
+
+// ---------------------------------------------------------------------------
+// Workflows
+// ---------------------------------------------------------------------------
+
+export async function listWorkflows() {
+  return handleResponse(await fetch("/workflows", { headers: authHeaders() }));
+}
+
+export async function createWorkflow(payload) {
+  return handleResponse(
+    await fetch("/workflows", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    })
+  );
+}
+
+export async function getWorkflow(workflowId) {
+  return handleResponse(await fetch(`/workflows/${workflowId}`, { headers: authHeaders() }));
+}
+
+export async function updateWorkflow(workflowId, payload) {
+  return handleResponse(
+    await fetch(`/workflows/${workflowId}`, {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    })
+  );
+}
+
+export async function deleteWorkflow(workflowId) {
+  return handleResponse(
+    await fetch(`/workflows/${workflowId}`, { method: "DELETE", headers: authHeaders() })
+  );
+}
+
+export async function triggerWorkflow(workflowId) {
+  return handleResponse(
+    await fetch(`/workflows/${workflowId}/trigger`, { method: "POST", headers: authHeaders() })
+  );
+}
+
+export async function listWorkflowRuns(workflowId) {
+  return handleResponse(await fetch(`/workflows/${workflowId}/runs`, { headers: authHeaders() }));
+}
+
+export async function getWorkflowRun(workflowId, runId) {
+  return handleResponse(await fetch(`/workflows/${workflowId}/runs/${runId}`, { headers: authHeaders() }));
+}
+
+export async function getWorkflowImages(workflowId) {
+  return handleResponse(await fetch(`/workflows/${workflowId}/images`, { headers: authHeaders() }));
+}
+
+export async function listModels() {
+  return handleResponse(await fetch("/models", { headers: authHeaders() }));
+}

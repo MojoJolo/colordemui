@@ -13,6 +13,7 @@ import LoginPage from "./components/LoginPage";
 import ProgressPanel from "./components/ProgressPanel";
 import PromptForm from "./components/PromptForm";
 import Toolbar from "./components/Toolbar";
+import WorkflowConfigTab from "./components/WorkflowConfigTab";
 import "./styles.css";
 
 export default function App() {
@@ -247,6 +248,13 @@ export default function App() {
           >
             Nano Banana 2
           </button>
+          <button
+            className={`tab${activePage === "workflow" ? " active" : ""}`}
+            onClick={() => setActivePage("workflow")}
+            type="button"
+          >
+            Workflows
+          </button>
         </nav>
       </header>
 
@@ -275,12 +283,15 @@ export default function App() {
         {activePage === "nano-banana-2" && (
           <NanoBanana2Form onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
         )}
+        {activePage === "workflow" && (
+          <WorkflowConfigTab onExpand={setExpandedImage} />
+        )}
 
         {error && <div className="error-banner">{error}</div>}
 
-        {activeJob && <ProgressPanel job={activeJob} />}
+        {activePage !== "workflow" && activeJob && <ProgressPanel job={activeJob} />}
 
-        {images.length > 0 && (
+        {activePage !== "workflow" && images.length > 0 && (
           <>
             <Toolbar
               images={images}

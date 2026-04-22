@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import BaseModel
 
 
@@ -44,3 +44,51 @@ class JobRecord(BaseModel):
     lora_scale: float = 0.5
     hf_api_token: Optional[str] = None
     prompt_upsampling: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Workflow models
+# ---------------------------------------------------------------------------
+
+class ScheduleUnit(str, Enum):
+    minutes = "minutes"
+    hours = "hours"
+    days = "days"
+
+
+class WorkflowStep(BaseModel):
+    step_id: str
+    model: str
+    num_outputs: int = 1
+    prompt_template: str = ""
+
+
+class WorkflowConfig(BaseModel):
+    workflow_id: str
+    name: str
+    slug: str
+    steps: List[WorkflowStep] = []
+    slot_lists: Dict[str, List[str]] = {}
+    schedule_value: int = 60
+    schedule_unit: ScheduleUnit = ScheduleUnit.minutes
+    enabled: bool = True
+    created_at: str
+    updated_at: str
+
+
+class WorkflowStepResult(BaseModel):
+    step_id: str
+    status: str = "running"
+    image_filenames: List[str] = []
+    error: Optional[str] = None
+
+
+class WorkflowRunRecord(BaseModel):
+    run_id: str
+    workflow_id: str
+    workflow_slug: str
+    started_at: str
+    finished_at: Optional[str] = None
+    status: str = "running"
+    step_results: List[WorkflowStepResult] = []
+    resolved_prompts: List[str] = []
