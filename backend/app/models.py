@@ -63,6 +63,7 @@ class WorkflowStep(BaseModel):
     prompt_template: str = ""
     aspect_ratio: str = "9:16"
     duration: int = 5
+    save_audio: bool = True
     initial_image_ids: List[str] = []
 
 

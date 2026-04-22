@@ -122,6 +122,7 @@ def _build_step(s) -> WorkflowStep:
         prompt_template=s.prompt_template,
         aspect_ratio=getattr(s, "aspect_ratio", "9:16"),
         duration=getattr(s, "duration", 5),
+        save_audio=getattr(s, "save_audio", True),
         initial_image_ids=getattr(s, "initial_image_ids", []),
     )
 
@@ -172,10 +173,10 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
                     img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
                 elif prev_image_bytes and model.accepts_image:
                     ref = prev_image_bytes[j % len(prev_image_bytes)]
-                    kwargs = {"duration": step.duration} if model.supports_duration else {}
+                    kwargs = {"duration": step.duration, "save_audio": step.save_audio} if model.supports_duration else {}
                     img_bytes = model.generate(prompt, ref, **kwargs)
                 else:
-                    kwargs = {"duration": step.duration} if model.supports_duration else {}
+                    kwargs = {"duration": step.duration, "save_audio": step.save_audio} if model.supports_duration else {}
                     img_bytes = model.generate(prompt, None, **kwargs)
                 produced_bytes.append(img_bytes)
 
@@ -233,6 +234,24 @@ def get_workflow_images(workflow_id: str) -> List[dict]:
                     "model": "",
                 })
     return images
+
+
+def delete_workflow_image(workflow_id: str, image_id: str) -> bool:
+    wf = workflow_storage.load_workflow(workflow_id)
+    if not wf:
+        return False
+    runs = workflow_storage.load_all_runs(wf.slug)
+    for run in runs:
+        for sr in run.step_results:
+            for k, fname in enumerate(sr.image_filenames):
+                if f"{run.run_id}_{sr.step_id}_{k}" == image_id:
+                    path = GENERATED_DIR / fname
+                    if path.exists():
+                        path.unlink()
+                    sr.image_filenames.pop(k)
+                    workflow_storage.save_run(run)
+                    return True
+    return False
 
 
 def get_run_progress(run: WorkflowRunRecord, wf: WorkflowConfig) -> dict:

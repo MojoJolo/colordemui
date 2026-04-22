@@ -9,6 +9,7 @@ const DEFAULT_STEP = () => ({
   prompt_template: "",
   aspect_ratio: "9:16",
   duration: 5,
+  save_audio: true,
   initial_image_ids: [],
 });
 
@@ -102,6 +103,7 @@ export default function WorkflowConfigTab({ onExpand }) {
         ...s,
         aspect_ratio: s.aspect_ratio || "9:16",
         duration: s.duration ?? 5,
+        save_audio: s.save_audio ?? true,
         initial_image_ids: s.initial_image_ids || [],
       })),
       slot_lists: { ...wf.slot_lists },
@@ -217,6 +219,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           prompt_template: s.prompt_template,
           aspect_ratio: s.aspect_ratio || "9:16",
           duration: s.duration ?? 5,
+          save_audio: s.save_audio ?? true,
           initial_image_ids: s.initial_image_ids || [],
         })),
         slot_lists: draft.slot_lists,
@@ -532,6 +535,18 @@ export default function WorkflowConfigTab({ onExpand }) {
                             />
                           </div>
                         )}
+                        {showDuration && (
+                          <div className="wf-field wf-field-audio">
+                            <label className="wf-toggle-label">
+                              <input
+                                type="checkbox"
+                                checked={step.save_audio ?? true}
+                                onChange={(e) => updateStep(i, "save_audio", e.target.checked)}
+                              />
+                              <span>Save audio</span>
+                            </label>
+                          </div>
+                        )}
                       </div>
 
                       {chainWarning && (
@@ -698,7 +713,14 @@ export default function WorkflowConfigTab({ onExpand }) {
           <ImageGrid
             images={wfImages}
             onSelect={() => {}}
-            onDelete={() => {}}
+            onDelete={async (imageId) => {
+              try {
+                await api.deleteWorkflowImage(selectedId, imageId);
+                setWfImages((prev) => prev.filter((img) => img.image_id !== imageId));
+              } catch (e) {
+                setError(e.message || "Delete failed.");
+              }
+            }}
             onExpand={onExpand}
           />
         </div>

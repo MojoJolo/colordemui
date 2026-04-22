@@ -255,6 +255,7 @@ def _wf_to_response(wf) -> WorkflowResponse:
             prompt_template=s.prompt_template,
             aspect_ratio=s.aspect_ratio,
             duration=s.duration,
+            save_audio=s.save_audio,
             initial_image_ids=s.initial_image_ids,
         ) for s in wf.steps],
         slot_lists=wf.slot_lists,
@@ -361,3 +362,10 @@ def get_workflow_run(workflow_id: str, run_id: str):
 def get_workflow_images(workflow_id: str):
     images = workflow_service.get_workflow_images(workflow_id)
     return [ImageResponse(**img) for img in images]
+
+
+@app.delete("/workflows/{workflow_id}/images/{image_id}")
+def delete_workflow_image(workflow_id: str, image_id: str):
+    if not workflow_service.delete_workflow_image(workflow_id, image_id):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return {"ok": True}
