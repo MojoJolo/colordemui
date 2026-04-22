@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 from typing import List, Optional
 
-from app.models import WorkflowConfig, WorkflowRunRecord, WorkflowStep, WorkflowStepResult
+from app.models import WorkflowConfig, WorkflowRunRecord, WorkflowStep, WorkflowStepResult, ScheduleUnit
 from app.services import models as model_registry
 from app.services import workflow_storage
 from app.services.storage import GENERATED_DIR
@@ -95,7 +95,7 @@ def update_workflow(workflow_id: str, request) -> Optional[WorkflowConfig]:
     wf.steps = [_build_step(s) for s in request.steps]
     wf.slot_lists = request.slot_lists
     wf.schedule_value = request.schedule_value
-    wf.schedule_unit = request.schedule_unit
+    wf.schedule_unit = ScheduleUnit(request.schedule_unit)
     wf.enabled = request.enabled
     wf.updated_at = utcnow()
     workflow_storage.save_workflow(wf)
