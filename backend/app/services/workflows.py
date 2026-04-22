@@ -121,6 +121,7 @@ def _build_step(s) -> WorkflowStep:
         num_outputs=s.num_outputs,
         prompt_template=s.prompt_template,
         aspect_ratio=getattr(s, "aspect_ratio", "9:16"),
+        duration=getattr(s, "duration", 5),
         initial_image_ids=getattr(s, "initial_image_ids", []),
     )
 
@@ -171,9 +172,11 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
                     img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
                 elif prev_image_bytes and model.accepts_image:
                     ref = prev_image_bytes[j % len(prev_image_bytes)]
-                    img_bytes = model.generate(prompt, ref)
+                    kwargs = {"duration": step.duration} if model.supports_duration else {}
+                    img_bytes = model.generate(prompt, ref, **kwargs)
                 else:
-                    img_bytes = model.generate(prompt, None)
+                    kwargs = {"duration": step.duration} if model.supports_duration else {}
+                    img_bytes = model.generate(prompt, None, **kwargs)
                 produced_bytes.append(img_bytes)
 
             filenames = []

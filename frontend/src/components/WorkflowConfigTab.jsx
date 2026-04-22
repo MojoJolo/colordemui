@@ -8,6 +8,7 @@ const DEFAULT_STEP = () => ({
   num_outputs: 1,
   prompt_template: "",
   aspect_ratio: "9:16",
+  duration: 5,
   initial_image_ids: [],
 });
 
@@ -100,6 +101,7 @@ export default function WorkflowConfigTab({ onExpand }) {
       steps: wf.steps.map((s) => ({
         ...s,
         aspect_ratio: s.aspect_ratio || "9:16",
+        duration: s.duration ?? 5,
         initial_image_ids: s.initial_image_ids || [],
       })),
       slot_lists: { ...wf.slot_lists },
@@ -214,6 +216,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           num_outputs: s.num_outputs,
           prompt_template: s.prompt_template,
           aspect_ratio: s.aspect_ratio || "9:16",
+          duration: s.duration ?? 5,
           initial_image_ids: s.initial_image_ids || [],
         })),
         slot_lists: draft.slot_lists,
@@ -443,6 +446,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                 const isChained = i > 0;
                 const chainWarning = isChained && modelInfo && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
                 const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio;
+                const showDuration = modelInfo && modelInfo.supports_duration;
                 const showRefPicker = modelInfo && modelInfo.is_multi_reference;
                 return (
                   <div key={i} className="wf-step-card">
@@ -513,6 +517,19 @@ export default function WorkflowConfigTab({ onExpand }) {
                                 <option key={r} value={r}>{r}</option>
                               ))}
                             </select>
+                          </div>
+                        )}
+                        {showDuration && (
+                          <div className="wf-field">
+                            <label className="prompt-label">Duration: {step.duration ?? 5}s</label>
+                            <input
+                              type="range"
+                              min={1}
+                              max={30}
+                              value={step.duration ?? 5}
+                              onChange={(e) => updateStep(i, "duration", parseInt(e.target.value))}
+                              className="wf-duration-slider"
+                            />
                           </div>
                         )}
                       </div>

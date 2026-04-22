@@ -254,6 +254,7 @@ def _wf_to_response(wf) -> WorkflowResponse:
             num_outputs=s.num_outputs,
             prompt_template=s.prompt_template,
             aspect_ratio=s.aspect_ratio,
+            duration=s.duration,
             initial_image_ids=s.initial_image_ids,
         ) for s in wf.steps],
         slot_lists=wf.slot_lists,
