@@ -15,6 +15,7 @@ export default defineConfig({
       "/models": apiProxyTarget,
       "/generated": apiProxyTarget,
       "/health": apiProxyTarget,
+      "/workflows": apiProxyTarget,
     },
   },
 });
