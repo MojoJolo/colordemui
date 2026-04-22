@@ -257,6 +257,7 @@ def _wf_to_response(wf) -> WorkflowResponse:
             duration=s.duration,
             save_audio=s.save_audio,
             initial_image_ids=s.initial_image_ids,
+            source_step_index=s.source_step_index,
         ) for s in wf.steps],
         slot_lists=wf.slot_lists,
         schedule_value=wf.schedule_value,

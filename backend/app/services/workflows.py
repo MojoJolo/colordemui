@@ -124,6 +124,7 @@ def _build_step(s) -> WorkflowStep:
         duration=getattr(s, "duration", 5),
         save_audio=getattr(s, "save_audio", True),
         initial_image_ids=getattr(s, "initial_image_ids", []),
+        source_step_index=getattr(s, "source_step_index", None),
     )
 
 
@@ -146,7 +147,8 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
     )
     workflow_storage.save_run(run)
 
-    prev_image_bytes: List[bytes] = []
+    # step_outputs[i] holds the produced bytes for step i once it completes
+    step_outputs: dict[int, List[bytes]] = {}
 
     # Pick one value per slot for the entire run so all steps share the same context
     picked_slots = {slot: [random.choice(words)] for slot, words in wf.slot_lists.items() if words}
@@ -163,19 +165,26 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
         run.step_results.append(step_result)
         workflow_storage.save_run(run)
 
+        # Resolve which step's output to use as reference input
+        if step.source_step_index is not None:
+            src = step.source_step_index
+            ref_bytes = step_outputs.get(src, [])
+        else:
+            ref_bytes = step_outputs.get(i - 1, []) if i > 0 else []
+
         produced_bytes: List[bytes] = []
         try:
             for j in range(step.num_outputs):
                 if model.is_multi_reference:
-                    ref_images = prev_image_bytes if prev_image_bytes else _load_images_by_ids(step.initial_image_ids)
+                    ref_images = ref_bytes if ref_bytes else _load_images_by_ids(step.initial_image_ids)
                     if not ref_images:
                         raise ValueError(
                             f"Step {i + 1} uses '{step.model}' which requires reference images, "
-                            "but none are available from the previous step or configured initial images."
+                            "but none are available from the source step or configured initial images."
                         )
                     img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
-                elif prev_image_bytes and model.accepts_image:
-                    ref = prev_image_bytes[j % len(prev_image_bytes)]
+                elif ref_bytes and model.accepts_image:
+                    ref = ref_bytes[j % len(ref_bytes)]
                     kwargs = {"duration": step.duration, "save_audio": step.save_audio} if model.supports_duration else {}
                     img_bytes = model.generate(prompt, ref, **kwargs)
                 else:
@@ -191,7 +200,7 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
 
             step_result.image_filenames = filenames
             step_result.status = "done"
-            prev_image_bytes = produced_bytes
+            step_outputs[i] = produced_bytes
 
         except Exception as exc:
             step_result.status = "failed"

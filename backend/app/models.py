@@ -65,6 +65,7 @@ class WorkflowStep(BaseModel):
     duration: int = 5
     save_audio: bool = True
     initial_image_ids: List[str] = []
+    source_step_index: Optional[int] = None  # None = use previous step's output
 
 
 class WorkflowConfig(BaseModel):

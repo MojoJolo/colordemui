@@ -11,6 +11,7 @@ const DEFAULT_STEP = () => ({
   duration: 5,
   save_audio: true,
   initial_image_ids: [],
+  source_step_index: null,
 });
 
 const DEFAULT_WORKFLOW = () => ({
@@ -106,6 +107,7 @@ export default function WorkflowConfigTab({ onExpand }) {
         duration: s.duration ?? 5,
         save_audio: s.save_audio ?? true,
         initial_image_ids: s.initial_image_ids || [],
+        source_step_index: s.source_step_index ?? null,
       })),
       slot_lists: { ...wf.slot_lists },
       schedule_value: wf.schedule_value,
@@ -222,6 +224,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           duration: s.duration ?? 5,
           save_audio: s.save_audio ?? true,
           initial_image_ids: s.initial_image_ids || [],
+          source_step_index: s.source_step_index ?? null,
         })),
         slot_lists: draft.slot_lists,
         schedule_value: draft.schedule_value,
@@ -243,6 +246,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           ...s,
           aspect_ratio: s.aspect_ratio || "9:16",
           initial_image_ids: s.initial_image_ids || [],
+          source_step_index: s.source_step_index ?? null,
         })),
         slot_lists: { ...saved.slot_lists },
         schedule_value: saved.schedule_value,
@@ -448,6 +452,10 @@ export default function WorkflowConfigTab({ onExpand }) {
               {draft.steps.map((step, i) => {
                 const modelInfo = models.find((m) => m.id === step.model);
                 const isChained = i > 0;
+                // which step index provides ref images: explicit source or previous step
+                const sourceIdx = (step.source_step_index != null && step.source_step_index < i)
+                  ? step.source_step_index
+                  : (i > 0 ? i - 1 : null);
                 const chainWarning = isChained && modelInfo && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
                 const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio;
                 const showDuration = modelInfo && modelInfo.supports_duration;
@@ -509,6 +517,23 @@ export default function WorkflowConfigTab({ onExpand }) {
                             onChange={(e) => updateStep(i, "num_outputs", Math.min(4, Math.max(1, parseInt(e.target.value) || 1)))}
                           />
                         </div>
+                        {i >= 2 && (
+                          <div className="wf-field">
+                            <label className="prompt-label">From step</label>
+                            <select
+                              className="klein-input"
+                              value={step.source_step_index ?? i - 1}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                updateStep(i, "source_step_index", val === i - 1 ? null : val);
+                              }}
+                            >
+                              {draft.steps.slice(0, i).map((_, si) => (
+                                <option key={si} value={si}>Step {si + 1}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                         {showAspectRatio && (
                           <div className="wf-field">
                             <label className="prompt-label">Aspect Ratio</label>
@@ -552,7 +577,7 @@ export default function WorkflowConfigTab({ onExpand }) {
 
                       {chainWarning && (
                         <div className="wf-warning">
-                          This model does not accept image input — previous step's output will not be passed as reference.
+                          This model does not accept image input — Step {sourceIdx + 1}'s output will not be passed as reference.
                         </div>
                       )}
 
@@ -561,7 +586,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                           <label className="prompt-label">
                             Reference Images
                             {isChained && (
-                              <span className="wf-ref-hint"> — previous step's output will be used; select below as fallback for Step 1</span>
+                              <span className="wf-ref-hint"> — Step {sourceIdx + 1}'s output will be used; select below as fallback for Step 1</span>
                             )}
                           </label>
                           {(() => {

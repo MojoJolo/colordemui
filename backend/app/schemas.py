@@ -60,6 +60,7 @@ class WorkflowStepRequest(BaseModel):
     duration: int = 5
     save_audio: bool = True
     initial_image_ids: List[str] = []
+    source_step_index: Optional[int] = None
 
 
 class WorkflowRequest(BaseModel):
@@ -80,6 +81,7 @@ class WorkflowStepResponse(BaseModel):
     duration: int = 5
     save_audio: bool = True
     initial_image_ids: List[str] = []
+    source_step_index: Optional[int] = None
 
 
 class WorkflowResponse(BaseModel):
