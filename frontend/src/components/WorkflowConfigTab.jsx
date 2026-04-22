@@ -400,7 +400,7 @@ export default function WorkflowConfigTab({ onExpand }) {
             </div>
             {Object.keys(draft.slot_lists).length === 0 && (
               <p className="wf-hint">
-                Add slots to randomize parts of your prompts. Use <code>{"{subject}"}</code> in a step prompt and add a "subject" slot with words.
+                Add slots to randomize parts of your prompts. Use <code>{"{subject}"}</code> in a step prompt and add a "subject" slot with one word or phrase per line.
               </p>
             )}
             <div className="wf-slot-table">
@@ -425,7 +425,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                     className="prompt-textarea wf-slot-textarea"
                     value={words.join("\n")}
                     onChange={(e) => updateSlotWords(key, e.target.value)}
-                    placeholder="one word per line"
+                    placeholder="one word or phrase per line"
                     rows={3}
                   />
                 </div>
