@@ -1,5 +1,7 @@
 import os
 import secrets
+import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
 
@@ -10,9 +12,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.schemas import CreateJobRequest, ImageResponse, JobResponse, SelectRequest
+from app.schemas import (
+    CreateJobRequest, ImageResponse, JobResponse, SelectRequest,
+    WorkflowRequest, WorkflowResponse, WorkflowStepResponse,
+    WorkflowRunResponse, WorkflowStepResultResponse,
+)
 from app.services import jobs as job_service
 from app.services import models as model_registry
+from app.services import workflows as workflow_service
+from app.services import workflow_storage
+from app.services import scheduler as scheduler_service
 
 GENERATED_DIR = Path("generated")
 GENERATED_DIR.mkdir(exist_ok=True)
@@ -24,7 +33,15 @@ _valid_tokens: set[str] = set()
 _PUBLIC_PATHS = {"/auth/login", "/health"}
 _PUBLIC_PREFIXES = ("/generated/",)
 
-app = FastAPI(title="Coloring Book Generator")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler_service.start_scheduler()
+    yield
+    scheduler_service.shutdown_scheduler()
+
+
+app = FastAPI(title="Coloring Book Generator", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -93,7 +110,6 @@ def health():
 
 @app.get("/models")
 def list_models():
-    """Return all registered models with their capabilities."""
     return model_registry.list_models()
 
 
@@ -221,3 +237,124 @@ def delete_image(image_id: str):
     if not job_service.delete_image(image_id):
         raise HTTPException(status_code=404, detail="Image not found")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Workflows
+# ---------------------------------------------------------------------------
+
+def _wf_to_response(wf) -> WorkflowResponse:
+    return WorkflowResponse(
+        workflow_id=wf.workflow_id,
+        name=wf.name,
+        slug=wf.slug,
+        steps=[WorkflowStepResponse(
+            step_id=s.step_id,
+            model=s.model,
+            num_outputs=s.num_outputs,
+            prompt_template=s.prompt_template,
+        ) for s in wf.steps],
+        slot_lists=wf.slot_lists,
+        schedule_value=wf.schedule_value,
+        schedule_unit=wf.schedule_unit.value,
+        enabled=wf.enabled,
+        created_at=wf.created_at,
+        updated_at=wf.updated_at,
+    )
+
+
+def _run_to_response(run, wf) -> WorkflowRunResponse:
+    progress = workflow_service.get_run_progress(run, wf)
+    return WorkflowRunResponse(
+        run_id=run.run_id,
+        workflow_id=run.workflow_id,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        status=run.status,
+        total=progress["total"],
+        completed=progress["completed"],
+        step_results=[
+            WorkflowStepResultResponse(
+                step_id=sr.step_id,
+                status=sr.status,
+                image_urls=[f"/generated/{fn}" for fn in sr.image_filenames],
+                error=sr.error,
+            )
+            for sr in run.step_results
+        ],
+        resolved_prompts=run.resolved_prompts,
+    )
+
+
+@app.get("/workflows", response_model=List[WorkflowResponse])
+def list_workflows():
+    return [_wf_to_response(wf) for wf in workflow_service.list_workflows()]
+
+
+@app.post("/workflows", response_model=WorkflowResponse)
+def create_workflow(request: WorkflowRequest):
+    wf = workflow_service.create_workflow(request)
+    scheduler_service.reschedule_workflow(wf)
+    return _wf_to_response(wf)
+
+
+@app.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
+def get_workflow(workflow_id: str):
+    wf = workflow_service.get_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return _wf_to_response(wf)
+
+
+@app.put("/workflows/{workflow_id}", response_model=WorkflowResponse)
+def update_workflow(workflow_id: str, request: WorkflowRequest):
+    wf = workflow_service.update_workflow(workflow_id, request)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    scheduler_service.reschedule_workflow(wf)
+    return _wf_to_response(wf)
+
+
+@app.delete("/workflows/{workflow_id}")
+def delete_workflow(workflow_id: str):
+    if not workflow_service.delete_workflow(workflow_id):
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    scheduler_service.remove_workflow_job(workflow_id)
+    return {"ok": True}
+
+
+@app.post("/workflows/{workflow_id}/trigger")
+def trigger_workflow(workflow_id: str, background_tasks: BackgroundTasks):
+    wf = workflow_service.get_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    run_id = str(uuid.uuid4())
+    background_tasks.add_task(workflow_service.run_workflow, workflow_id, run_id)
+    return {"run_id": run_id, "workflow_id": workflow_id}
+
+
+@app.get("/workflows/{workflow_id}/runs")
+def list_workflow_runs(workflow_id: str):
+    wf = workflow_service.get_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    runs = workflow_storage.load_all_runs(wf.slug)
+    runs.sort(key=lambda r: r.started_at, reverse=True)
+    return [_run_to_response(r, wf) for r in runs]
+
+
+@app.get("/workflows/{workflow_id}/runs/{run_id}", response_model=WorkflowRunResponse)
+def get_workflow_run(workflow_id: str, run_id: str):
+    wf = workflow_service.get_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    run = workflow_storage.load_run(wf.slug, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return _run_to_response(run, wf)
+
+
+@app.get("/workflows/{workflow_id}/images", response_model=List[ImageResponse])
+def get_workflow_images(workflow_id: str):
+    images = workflow_service.get_workflow_images(workflow_id)
+    return [ImageResponse(**img) for img in images]

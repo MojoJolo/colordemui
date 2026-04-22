@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pydantic import BaseModel
 from app.models import ImageStatus, JobStatus
 
@@ -45,3 +45,62 @@ class JobResponse(BaseModel):
     total: int
     completed: int
     images: List[ImageResponse]
+
+
+# ---------------------------------------------------------------------------
+# Workflow schemas
+# ---------------------------------------------------------------------------
+
+class WorkflowStepRequest(BaseModel):
+    step_id: Optional[str] = None
+    model: str
+    num_outputs: int = 1
+    prompt_template: str = ""
+
+
+class WorkflowRequest(BaseModel):
+    name: str
+    steps: List[WorkflowStepRequest] = []
+    slot_lists: Dict[str, List[str]] = {}
+    schedule_value: int = 60
+    schedule_unit: str = "minutes"
+    enabled: bool = True
+
+
+class WorkflowStepResponse(BaseModel):
+    step_id: str
+    model: str
+    num_outputs: int
+    prompt_template: str
+
+
+class WorkflowResponse(BaseModel):
+    workflow_id: str
+    name: str
+    slug: str
+    steps: List[WorkflowStepResponse]
+    slot_lists: Dict[str, List[str]]
+    schedule_value: int
+    schedule_unit: str
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+
+class WorkflowStepResultResponse(BaseModel):
+    step_id: str
+    status: str
+    image_urls: List[str] = []
+    error: Optional[str] = None
+
+
+class WorkflowRunResponse(BaseModel):
+    run_id: str
+    workflow_id: str
+    started_at: str
+    finished_at: Optional[str] = None
+    status: str
+    total: int
+    completed: int
+    step_results: List[WorkflowStepResultResponse]
+    resolved_prompts: List[str]
