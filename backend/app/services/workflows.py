@@ -148,8 +148,11 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
 
     prev_image_bytes: List[bytes] = []
 
+    # Pick one value per slot for the entire run so all steps share the same context
+    picked_slots = {slot: [random.choice(words)] for slot, words in wf.slot_lists.items() if words}
+
     for i, step in enumerate(wf.steps):
-        prompt = resolve_prompt(step.prompt_template, wf.slot_lists)
+        prompt = resolve_prompt(step.prompt_template, picked_slots)
         run.resolved_prompts.append(prompt)
 
         model = model_registry.get_model(step.model)
