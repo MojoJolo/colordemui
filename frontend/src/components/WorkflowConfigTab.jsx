@@ -603,7 +603,6 @@ export default function WorkflowConfigTab({ onExpand }) {
                               .filter((img) => img.filename && img.status === "done"
                                 && !img.filename.endsWith(".mp4")
                                 && !img.filename.endsWith(".svg"))
-                              .slice(-80)
                               .reverse();
                             return refImages.length === 0 ? (
                               <p className="wf-hint">No generated images yet. Run some generations first.</p>
