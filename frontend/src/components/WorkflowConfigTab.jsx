@@ -89,6 +89,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           setActiveRunId(null);
           api.getWorkflowImages(selectedId).then(setWfImages).catch(() => {});
           api.listWorkflowRuns(selectedId).then(setRuns).catch(() => {});
+          api.getAllImages().then(setAllImages).catch(() => {});
         }
       } catch (e) {
         // keep polling
@@ -583,18 +584,26 @@ export default function WorkflowConfigTab({ onExpand }) {
 
                       {showRefPicker && (
                         <div className="wf-ref-picker">
-                          <label className="prompt-label">
-                            Reference Images
-                            {isChained && (
-                              <span className="wf-ref-hint"> — Step {sourceIdx + 1}'s output will be used; select below as fallback for Step 1</span>
-                            )}
-                          </label>
+                          <div className="wf-ref-picker-header">
+                            <label className="prompt-label">
+                              Reference Images
+                              {isChained && (
+                                <span className="wf-ref-hint"> — Step {sourceIdx + 1}'s output will be used; select below as fallback for Step 1</span>
+                              )}
+                            </label>
+                            <button
+                              type="button"
+                              className="btn btn-secondary wf-btn-sm"
+                              onClick={() => api.getAllImages().then(setAllImages).catch(() => {})}
+                              title="Refresh image list"
+                            >↻</button>
+                          </div>
                           {(() => {
                             const refImages = allImages
                               .filter((img) => img.filename && img.status === "done"
                                 && !img.filename.endsWith(".mp4")
                                 && !img.filename.endsWith(".svg"))
-                              .slice(-40)
+                              .slice(-80)
                               .reverse();
                             return refImages.length === 0 ? (
                               <p className="wf-hint">No generated images yet. Run some generations first.</p>

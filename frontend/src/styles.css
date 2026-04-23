@@ -1479,6 +1479,13 @@ body {
   gap: 0.4rem;
 }
 
+.wf-ref-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .wf-ref-hint {
   font-weight: 400;
   color: #6b7280;
