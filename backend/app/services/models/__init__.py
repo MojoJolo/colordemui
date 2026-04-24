@@ -10,6 +10,7 @@ from app.services.models.p_image_lora import PImageLoraModel
 from app.services.models.p_image_edit import PImageEditModel
 from app.services.models.grok_video import GrokVideoModel
 from app.services.models.nano_banana_2 import NanoBanana2Model
+from app.services.models.tiktok_captions import TikTokCaptionsModel
 
 # ---------------------------------------------------------------------------
 # Registry — add new models here, nothing else needs to change.
@@ -24,6 +25,7 @@ _REGISTRY: Dict[str, ImageModel] = {
     "p-image-edit": PImageEditModel(),
     "grok-video": GrokVideoModel(),
     "nano-banana-2": NanoBanana2Model(),
+    "tiktok-captions": TikTokCaptionsModel(),
 }
 
 

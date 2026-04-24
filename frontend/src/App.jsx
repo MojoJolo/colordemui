@@ -13,6 +13,7 @@ import LoginPage from "./components/LoginPage";
 import ProgressPanel from "./components/ProgressPanel";
 import PromptForm from "./components/PromptForm";
 import Toolbar from "./components/Toolbar";
+import TikTokCaptionsForm from "./components/TikTokCaptionsForm";
 import WorkflowConfigTab from "./components/WorkflowConfigTab";
 import "./styles.css";
 
@@ -249,6 +250,13 @@ export default function App() {
             Nano Banana 2
           </button>
           <button
+            className={`tab${activePage === "tiktok-captions" ? " active" : ""}`}
+            onClick={() => setActivePage("tiktok-captions")}
+            type="button"
+          >
+            TikTok Captions
+          </button>
+          <button
             className={`tab${activePage === "workflow" ? " active" : ""}`}
             onClick={() => setActivePage("workflow")}
             type="button"
@@ -282,6 +290,9 @@ export default function App() {
         )}
         {activePage === "nano-banana-2" && (
           <NanoBanana2Form onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
+        )}
+        {activePage === "tiktok-captions" && (
+          <TikTokCaptionsForm onGenerate={handleGenerate} isGenerating={isGenerating} />
         )}
         {activePage === "workflow" && (
           <WorkflowConfigTab onExpand={setExpandedImage} />

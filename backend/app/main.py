@@ -162,6 +162,8 @@ async def create_job(request: CreateJobRequest, background_tasks: BackgroundTask
             lora_scale=request.lora_scale,
             hf_api_token=request.hf_api_token,
             prompt_upsampling=request.prompt_upsampling,
+            language=request.language,
+            caption_size=request.caption_size,
         )
     except Exception as exc:
         import traceback
