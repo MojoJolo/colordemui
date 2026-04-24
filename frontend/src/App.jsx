@@ -292,7 +292,7 @@ export default function App() {
           <NanoBanana2Form onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
         )}
         {activePage === "tiktok-captions" && (
-          <TikTokCaptionsForm onGenerate={handleGenerate} isGenerating={isGenerating} />
+          <TikTokCaptionsForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
         )}
         {activePage === "workflow" && (
           <WorkflowConfigTab onExpand={setExpandedImage} />

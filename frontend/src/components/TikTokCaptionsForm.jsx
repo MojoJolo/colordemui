@@ -9,7 +9,8 @@ function readFileAsDataUrl(file) {
   });
 }
 
-export default function TikTokCaptionsForm({ onGenerate, isGenerating }) {
+export default function TikTokCaptionsForm({ onGenerate, isGenerating, images }) {
+  const [selectedVideoId, setSelectedVideoId] = useState(null);
   const [videoDataUrl, setVideoDataUrl] = useState(null);
   const [videoName, setVideoName] = useState("");
   const [language, setLanguage] = useState("english");
@@ -18,12 +19,17 @@ export default function TikTokCaptionsForm({ onGenerate, isGenerating }) {
   const [videoOnly, setVideoOnly] = useState(false);
   const fileInputRef = useRef(null);
 
+  const videoCandidates = (images || []).filter(
+    (img) => img.status === "done" && img.url && img.filename?.endsWith(".mp4")
+  );
+
   async function handleFile(file) {
     if (!file || !file.type.startsWith("video/")) return;
     try {
       const dataUrl = await readFileAsDataUrl(file);
       setVideoDataUrl(dataUrl);
       setVideoName(file.name);
+      setSelectedVideoId(null);
     } catch (e) {
       console.error("Failed to load video:", e);
     }
@@ -37,16 +43,18 @@ export default function TikTokCaptionsForm({ onGenerate, isGenerating }) {
 
   function handleSubmit(e) {
     e.preventDefault();
-    if (!videoDataUrl) return;
+    if (!videoDataUrl && !selectedVideoId) return;
     onGenerate([initialPrompt.trim()], "tiktok-captions", null, {
-      firstFrameData: videoDataUrl,
+      selectedImageId: videoDataUrl ? undefined : (selectedVideoId || undefined),
+      firstFrameData: videoDataUrl || undefined,
       language,
       captionSize,
       saveAudio: !videoOnly,
     });
   }
 
-  const canSubmit = !isGenerating && !!videoDataUrl;
+  const hasInput = !!videoDataUrl || !!selectedVideoId;
+  const canSubmit = !isGenerating && hasInput;
 
   return (
     <form className="prompt-form" onSubmit={handleSubmit}>
@@ -56,6 +64,31 @@ export default function TikTokCaptionsForm({ onGenerate, isGenerating }) {
       </div>
 
       <label className="prompt-label">Video (required)</label>
+
+      {/* Gallery picker for previous videos */}
+      {videoCandidates.length > 0 && (
+        <div className={`pvideo-picker${videoDataUrl ? " pvideo-picker-dim" : ""}`}>
+          {videoCandidates.map((vid) => (
+            <div
+              key={vid.image_id}
+              className={`pvideo-thumb${!videoDataUrl && selectedVideoId === vid.image_id ? " selected" : ""}`}
+              onClick={() => {
+                if (isGenerating || videoDataUrl) return;
+                setSelectedVideoId(selectedVideoId === vid.image_id ? null : vid.image_id);
+              }}
+              title={vid.prompt}
+            >
+              <video src={vid.url} muted playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {videoCandidates.length > 0 && (
+        <div className="pvideo-or-divider"><span>or upload</span></div>
+      )}
+
+      {/* Upload zone / preview */}
       {videoDataUrl ? (
         <div className="pvideo-upload-preview">
           <video src={videoDataUrl} muted playsInline controls style={{ maxWidth: "100%", maxHeight: "220px" }} />
@@ -88,7 +121,9 @@ export default function TikTokCaptionsForm({ onGenerate, isGenerating }) {
             disabled={isGenerating}
           />
           <span className="pvideo-upload-icon">↑</span>
-          <span className="pvideo-upload-hint">Drop or click to upload a video</span>
+          <span className="pvideo-upload-hint">
+            {selectedVideoId ? "Or drop a file to override gallery selection" : "Drop or click to upload a video"}
+          </span>
         </div>
       )}
 
