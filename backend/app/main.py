@@ -129,13 +129,16 @@ def get_all_images():
 @app.post("/jobs", response_model=JobResponse)
 async def create_job(request: CreateJobRequest, background_tasks: BackgroundTasks):
     prompts = [p.strip() for p in request.prompts if p.strip()]
-    if not prompts:
-        raise HTTPException(status_code=400, detail="No valid prompts provided")
 
     try:
         model = model_registry.get_model(request.model)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    if not prompts and not model.supports_captions:
+        raise HTTPException(status_code=400, detail="No valid prompts provided")
+    if not prompts:
+        prompts = [""]
 
     has_image_input = bool(request.image_data) or bool(request.selected_image_id)
     if model.requires_image and not has_image_input:
