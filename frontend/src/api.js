@@ -65,7 +65,7 @@ export async function createJob(prompts, model = "recraft-v3-svg", imageData = n
     aspectRatio = "9:16", selectedLastFrameImageId = null, saveAudio = true,
     firstFrameData = null, lastFrameData = null,
     loraWeights = null, loraScale = 0.5, hfApiToken = null, promptUpsampling = false,
-    language = "english", captionSize = 40,
+    language = "en", captionSize = 40,
   } = options;
   return handleResponse(
     await fetch("/jobs", {
