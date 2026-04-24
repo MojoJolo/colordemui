@@ -323,7 +323,7 @@ async def run_job(job_id: str) -> None:
                 fn = functools.partial(model.generate, image.prompt, ref_image_bytes, job.aspect_ratio)
                 image_bytes: bytes = await loop.run_in_executor(_executor, fn)
             elif model.supports_captions:
-                fn = functools.partial(model.generate, image.prompt, ref_image_bytes, job.language, job.caption_size)
+                fn = functools.partial(model.generate, image.prompt, ref_image_bytes, job.language, job.caption_size, job.save_audio)
                 image_bytes: bytes = await loop.run_in_executor(_executor, fn)
             else:
                 image_bytes: bytes = await loop.run_in_executor(

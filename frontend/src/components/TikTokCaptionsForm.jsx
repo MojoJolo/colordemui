@@ -15,6 +15,7 @@ export default function TikTokCaptionsForm({ onGenerate, isGenerating }) {
   const [language, setLanguage] = useState("english");
   const [captionSize, setCaptionSize] = useState(40);
   const [initialPrompt, setInitialPrompt] = useState("");
+  const [videoOnly, setVideoOnly] = useState(false);
   const fileInputRef = useRef(null);
 
   async function handleFile(file) {
@@ -41,6 +42,7 @@ export default function TikTokCaptionsForm({ onGenerate, isGenerating }) {
       firstFrameData: videoDataUrl,
       language,
       captionSize,
+      saveAudio: !videoOnly,
     });
   }
 
@@ -129,6 +131,16 @@ export default function TikTokCaptionsForm({ onGenerate, isGenerating }) {
         rows={2}
         disabled={isGenerating}
       />
+
+      <label className="pvideo-toggle-label" style={{ marginTop: "16px" }}>
+        <input
+          type="checkbox"
+          checked={videoOnly}
+          onChange={(e) => setVideoOnly(e.target.checked)}
+          disabled={isGenerating}
+        />
+        <span>Video only (no audio)</span>
+      </label>
 
       <button
         type="submit"
