@@ -56,6 +56,11 @@ class WorkflowStepRequest(BaseModel):
     model: str
     num_outputs: int = 1
     prompt_template: str = ""
+    aspect_ratio: str = "9:16"
+    duration: int = 5
+    save_audio: bool = True
+    initial_image_ids: List[str] = []
+    source_step_index: Optional[int] = None
 
 
 class WorkflowRequest(BaseModel):
@@ -72,6 +77,11 @@ class WorkflowStepResponse(BaseModel):
     model: str
     num_outputs: int
     prompt_template: str
+    aspect_ratio: str = "9:16"
+    duration: int = 5
+    save_audio: bool = True
+    initial_image_ids: List[str] = []
+    source_step_index: Optional[int] = None
 
 
 class WorkflowResponse(BaseModel):

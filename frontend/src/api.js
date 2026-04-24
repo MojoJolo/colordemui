@@ -197,6 +197,12 @@ export async function getWorkflowImages(workflowId) {
   return handleResponse(await fetch(`/workflows/${workflowId}/images`, { headers: authHeaders() }));
 }
 
+export async function deleteWorkflowImage(workflowId, imageId) {
+  return handleResponse(
+    await fetch(`/workflows/${workflowId}/images/${imageId}`, { method: "DELETE", headers: authHeaders() })
+  );
+}
+
 export async function listModels() {
   return handleResponse(await fetch("/models", { headers: authHeaders() }));
 }

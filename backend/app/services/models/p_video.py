@@ -21,7 +21,11 @@ class PVideoModel(ImageModel):
 
     @property
     def accepts_image(self) -> bool:
-        return False  # image is optional — no upload required
+        return True
+
+    @property
+    def supports_aspect_ratio(self) -> bool:
+        return True
 
     @property
     def supports_duration(self) -> bool:

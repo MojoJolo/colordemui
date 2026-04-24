@@ -4,11 +4,26 @@ import uuid
 from pathlib import Path
 from typing import List, Optional
 
-from app.models import WorkflowConfig, WorkflowRunRecord, WorkflowStep, WorkflowStepResult
+from app.models import WorkflowConfig, WorkflowRunRecord, WorkflowStep, WorkflowStepResult, ScheduleUnit
 from app.services import models as model_registry
 from app.services import workflow_storage
 from app.services.storage import GENERATED_DIR
 from app.utils import utcnow
+
+
+def _load_images_by_ids(image_ids: List[str]) -> List[bytes]:
+    """Load image bytes from disk for the given image IDs."""
+    from app.services import jobs as job_service
+    all_images = job_service.get_all_images()
+    id_to_filename = {img.image_id: img.filename for img in all_images if img.filename}
+    result = []
+    for image_id in image_ids:
+        filename = id_to_filename.get(image_id)
+        if filename:
+            path = GENERATED_DIR / filename
+            if path.exists():
+                result.append(path.read_bytes())
+    return result
 
 
 def _derive_slug(name: str) -> str:
@@ -80,7 +95,7 @@ def update_workflow(workflow_id: str, request) -> Optional[WorkflowConfig]:
     wf.steps = [_build_step(s) for s in request.steps]
     wf.slot_lists = request.slot_lists
     wf.schedule_value = request.schedule_value
-    wf.schedule_unit = request.schedule_unit
+    wf.schedule_unit = ScheduleUnit(request.schedule_unit)
     wf.enabled = request.enabled
     wf.updated_at = utcnow()
     workflow_storage.save_workflow(wf)
@@ -105,6 +120,11 @@ def _build_step(s) -> WorkflowStep:
         model=s.model,
         num_outputs=s.num_outputs,
         prompt_template=s.prompt_template,
+        aspect_ratio=getattr(s, "aspect_ratio", "9:16"),
+        duration=getattr(s, "duration", 5),
+        save_audio=getattr(s, "save_audio", True),
+        initial_image_ids=getattr(s, "initial_image_ids", []),
+        source_step_index=getattr(s, "source_step_index", None),
     )
 
 
@@ -127,10 +147,14 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
     )
     workflow_storage.save_run(run)
 
-    prev_image_bytes: List[bytes] = []
+    # step_outputs[i] holds the produced bytes for step i once it completes
+    step_outputs: dict[int, List[bytes]] = {}
+
+    # Pick one value per slot for the entire run so all steps share the same context
+    picked_slots = {slot: [random.choice(words)] for slot, words in wf.slot_lists.items() if words}
 
     for i, step in enumerate(wf.steps):
-        prompt = resolve_prompt(step.prompt_template, wf.slot_lists)
+        prompt = resolve_prompt(step.prompt_template, picked_slots)
         run.resolved_prompts.append(prompt)
 
         model = model_registry.get_model(step.model)
@@ -141,16 +165,31 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
         run.step_results.append(step_result)
         workflow_storage.save_run(run)
 
+        # Resolve which step's output to use as reference input
+        if step.source_step_index is not None:
+            src = step.source_step_index
+            ref_bytes = step_outputs.get(src, [])
+        else:
+            ref_bytes = step_outputs.get(i - 1, []) if i > 0 else []
+
         produced_bytes: List[bytes] = []
         try:
             for j in range(step.num_outputs):
-                if model.is_multi_reference and prev_image_bytes:
-                    img_bytes = model.generate_one(prompt, prev_image_bytes, seed=None, aspect_ratio="1:1")
-                elif prev_image_bytes and model.accepts_image:
-                    ref = prev_image_bytes[j % len(prev_image_bytes)]
-                    img_bytes = model.generate(prompt, ref)
+                if model.is_multi_reference:
+                    ref_images = ref_bytes if ref_bytes else _load_images_by_ids(step.initial_image_ids)
+                    if not ref_images:
+                        raise ValueError(
+                            f"Step {i + 1} uses '{step.model}' which requires reference images, "
+                            "but none are available from the source step or configured initial images."
+                        )
+                    img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
+                elif ref_bytes and model.accepts_image:
+                    ref = ref_bytes[j % len(ref_bytes)]
+                    kwargs = {"duration": step.duration, "save_audio": step.save_audio} if model.supports_duration else {}
+                    img_bytes = model.generate(prompt, ref, **kwargs)
                 else:
-                    img_bytes = model.generate(prompt, None)
+                    kwargs = {"duration": step.duration, "save_audio": step.save_audio} if model.supports_duration else {}
+                    img_bytes = model.generate(prompt, None, **kwargs)
                 produced_bytes.append(img_bytes)
 
             filenames = []
@@ -161,7 +200,7 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
 
             step_result.image_filenames = filenames
             step_result.status = "done"
-            prev_image_bytes = produced_bytes
+            step_outputs[i] = produced_bytes
 
         except Exception as exc:
             step_result.status = "failed"
@@ -207,6 +246,24 @@ def get_workflow_images(workflow_id: str) -> List[dict]:
                     "model": "",
                 })
     return images
+
+
+def delete_workflow_image(workflow_id: str, image_id: str) -> bool:
+    wf = workflow_storage.load_workflow(workflow_id)
+    if not wf:
+        return False
+    runs = workflow_storage.load_all_runs(wf.slug)
+    for run in runs:
+        for sr in run.step_results:
+            for k, fname in enumerate(sr.image_filenames):
+                if f"{run.run_id}_{sr.step_id}_{k}" == image_id:
+                    path = GENERATED_DIR / fname
+                    if path.exists():
+                        path.unlink()
+                    sr.image_filenames.pop(k)
+                    workflow_storage.save_run(run)
+                    return True
+    return False
 
 
 def get_run_progress(run: WorkflowRunRecord, wf: WorkflowConfig) -> dict:

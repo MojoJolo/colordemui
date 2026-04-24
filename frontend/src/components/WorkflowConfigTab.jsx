@@ -7,6 +7,11 @@ const DEFAULT_STEP = () => ({
   model: "recraft-v3-svg",
   num_outputs: 1,
   prompt_template: "",
+  aspect_ratio: "9:16",
+  duration: 5,
+  save_audio: true,
+  initial_image_ids: [],
+  source_step_index: null,
 });
 
 const DEFAULT_WORKFLOW = () => ({
@@ -37,6 +42,7 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [draft, setDraft] = useState(null);
   const [isNew, setIsNew] = useState(false);
   const [models, setModels] = useState([]);
+  const [allImages, setAllImages] = useState([]);
   const [runs, setRuns] = useState([]);
   const [wfImages, setWfImages] = useState([]);
   const [activeRunId, setActiveRunId] = useState(null);
@@ -46,10 +52,11 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [expandedRunId, setExpandedRunId] = useState(null);
   const pollRef = useRef(null);
 
-  // Load models + workflows on mount
+  // Load models + workflows + all images on mount
   useEffect(() => {
     api.listModels().then(setModels).catch(() => {});
     api.listWorkflows().then(setWorkflows).catch(() => {});
+    api.getAllImages().then(setAllImages).catch(() => {});
   }, []);
 
   // Load runs + images when a workflow is selected
@@ -81,6 +88,8 @@ export default function WorkflowConfigTab({ onExpand }) {
         if (run.status === "done" || run.status === "failed") {
           setActiveRunId(null);
           api.getWorkflowImages(selectedId).then(setWfImages).catch(() => {});
+          api.listWorkflowRuns(selectedId).then(setRuns).catch(() => {});
+          api.getAllImages().then(setAllImages).catch(() => {});
         }
       } catch (e) {
         // keep polling
@@ -93,7 +102,14 @@ export default function WorkflowConfigTab({ onExpand }) {
     setSelectedId(wf.workflow_id);
     setDraft({
       name: wf.name,
-      steps: wf.steps.map((s) => ({ ...s })),
+      steps: wf.steps.map((s) => ({
+        ...s,
+        aspect_ratio: s.aspect_ratio || "9:16",
+        duration: s.duration ?? 5,
+        save_audio: s.save_audio ?? true,
+        initial_image_ids: s.initial_image_ids || [],
+        source_step_index: s.source_step_index ?? null,
+      })),
       slot_lists: { ...wf.slot_lists },
       schedule_value: wf.schedule_value,
       schedule_unit: wf.schedule_unit,
@@ -205,6 +221,11 @@ export default function WorkflowConfigTab({ onExpand }) {
           model: s.model,
           num_outputs: s.num_outputs,
           prompt_template: s.prompt_template,
+          aspect_ratio: s.aspect_ratio || "9:16",
+          duration: s.duration ?? 5,
+          save_audio: s.save_audio ?? true,
+          initial_image_ids: s.initial_image_ids || [],
+          source_step_index: s.source_step_index ?? null,
         })),
         slot_lists: draft.slot_lists,
         schedule_value: draft.schedule_value,
@@ -222,7 +243,12 @@ export default function WorkflowConfigTab({ onExpand }) {
       setSelectedId(saved.workflow_id);
       setDraft({
         name: saved.name,
-        steps: saved.steps.map((s) => ({ ...s })),
+        steps: saved.steps.map((s) => ({
+          ...s,
+          aspect_ratio: s.aspect_ratio || "9:16",
+          initial_image_ids: s.initial_image_ids || [],
+          source_step_index: s.source_step_index ?? null,
+        })),
         slot_lists: { ...saved.slot_lists },
         schedule_value: saved.schedule_value,
         schedule_unit: saved.schedule_unit,
@@ -380,7 +406,7 @@ export default function WorkflowConfigTab({ onExpand }) {
             </div>
             {Object.keys(draft.slot_lists).length === 0 && (
               <p className="wf-hint">
-                Add slots to randomize parts of your prompts. Use <code>{"{subject}"}</code> in a step prompt and add a "subject" slot with words.
+                Add slots to randomize parts of your prompts. Use <code>{"{subject}"}</code> in a step prompt and add a "subject" slot with one word or phrase per line.
               </p>
             )}
             <div className="wf-slot-table">
@@ -405,7 +431,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                     className="prompt-textarea wf-slot-textarea"
                     value={words.join("\n")}
                     onChange={(e) => updateSlotWords(key, e.target.value)}
-                    placeholder="one word per line"
+                    placeholder="one word or phrase per line"
                     rows={3}
                   />
                 </div>
@@ -427,7 +453,14 @@ export default function WorkflowConfigTab({ onExpand }) {
               {draft.steps.map((step, i) => {
                 const modelInfo = models.find((m) => m.id === step.model);
                 const isChained = i > 0;
+                // which step index provides ref images: explicit source or previous step
+                const sourceIdx = (step.source_step_index != null && step.source_step_index < i)
+                  ? step.source_step_index
+                  : (i > 0 ? i - 1 : null);
                 const chainWarning = isChained && modelInfo && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
+                const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio;
+                const showDuration = modelInfo && modelInfo.supports_duration;
+                const showRefPicker = modelInfo && modelInfo.is_multi_reference;
                 return (
                   <div key={i} className="wf-step-card">
                     <div className="wf-step-header">
@@ -485,11 +518,118 @@ export default function WorkflowConfigTab({ onExpand }) {
                             onChange={(e) => updateStep(i, "num_outputs", Math.min(4, Math.max(1, parseInt(e.target.value) || 1)))}
                           />
                         </div>
+                        {i >= 2 && (
+                          <div className="wf-field">
+                            <label className="prompt-label">From step</label>
+                            <select
+                              className="klein-input"
+                              value={step.source_step_index ?? i - 1}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                updateStep(i, "source_step_index", val === i - 1 ? null : val);
+                              }}
+                            >
+                              {draft.steps.slice(0, i).map((_, si) => (
+                                <option key={si} value={si}>Step {si + 1}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {showAspectRatio && (
+                          <div className="wf-field">
+                            <label className="prompt-label">Aspect Ratio</label>
+                            <select
+                              className="klein-input"
+                              value={step.aspect_ratio || "9:16"}
+                              onChange={(e) => updateStep(i, "aspect_ratio", e.target.value)}
+                            >
+                              {["9:16", "1:1", "4:5", "16:9", "3:4", "2:3"].map((r) => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {showDuration && (
+                          <div className="wf-field">
+                            <label className="prompt-label">Duration: {step.duration ?? 5}s</label>
+                            <input
+                              type="range"
+                              min={1}
+                              max={30}
+                              value={step.duration ?? 5}
+                              onChange={(e) => updateStep(i, "duration", parseInt(e.target.value))}
+                              className="wf-duration-slider"
+                            />
+                          </div>
+                        )}
+                        {showDuration && (
+                          <div className="wf-field wf-field-audio">
+                            <label className="wf-toggle-label">
+                              <input
+                                type="checkbox"
+                                checked={step.save_audio ?? true}
+                                onChange={(e) => updateStep(i, "save_audio", e.target.checked)}
+                              />
+                              <span>Save audio</span>
+                            </label>
+                          </div>
+                        )}
                       </div>
 
                       {chainWarning && (
                         <div className="wf-warning">
-                          This model does not accept image input — previous step's output will not be passed as reference.
+                          This model does not accept image input — Step {sourceIdx + 1}'s output will not be passed as reference.
+                        </div>
+                      )}
+
+                      {showRefPicker && (
+                        <div className="wf-ref-picker">
+                          <div className="wf-ref-picker-header">
+                            <label className="prompt-label">
+                              Reference Images
+                              {isChained && (
+                                <span className="wf-ref-hint"> — Step {sourceIdx + 1}'s output will be used; select below as fallback for Step 1</span>
+                              )}
+                            </label>
+                            <button
+                              type="button"
+                              className="btn btn-secondary wf-btn-sm"
+                              onClick={() => api.getAllImages().then(setAllImages).catch(() => {})}
+                              title="Refresh image list"
+                            >↻</button>
+                          </div>
+                          {(() => {
+                            const refImages = allImages
+                              .filter((img) => img.filename && img.status === "done"
+                                && !img.filename.endsWith(".mp4")
+                                && !img.filename.endsWith(".svg"))
+                              .reverse();
+                            return refImages.length === 0 ? (
+                              <p className="wf-hint">No generated images yet. Run some generations first.</p>
+                            ) : (
+                              <div className="wf-ref-grid">
+                                {refImages.map((img) => {
+                                  const selected = (step.initial_image_ids || []).includes(img.image_id);
+                                  return (
+                                    <div
+                                      key={img.image_id}
+                                      className={`wf-ref-thumb${selected ? " selected" : ""}`}
+                                      onClick={() => {
+                                        const ids = step.initial_image_ids || [];
+                                        updateStep(i, "initial_image_ids", selected
+                                          ? ids.filter((id) => id !== img.image_id)
+                                          : [...ids, img.image_id]
+                                        );
+                                      }}
+                                    >
+                                      <img src={img.url} alt="" />
+                                      {selected && <span className="wf-ref-check">✓</span>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
 
@@ -570,7 +710,7 @@ export default function WorkflowConfigTab({ onExpand }) {
             <span className="wf-section-title">Run History</span>
           </div>
           <div className="wf-run-list">
-            {runs.slice(0, 10).map((run) => (
+            {runs.map((run) => (
               <div key={run.run_id} className="wf-run-item">
                 <div
                   className="wf-run-summary"
@@ -615,7 +755,14 @@ export default function WorkflowConfigTab({ onExpand }) {
           <ImageGrid
             images={wfImages}
             onSelect={() => {}}
-            onDelete={() => {}}
+            onDelete={async (imageId) => {
+              try {
+                await api.deleteWorkflowImage(selectedId, imageId);
+                setWfImages((prev) => prev.filter((img) => img.image_id !== imageId));
+              } catch (e) {
+                setError(e.message || "Delete failed.");
+              }
+            }}
             onExpand={onExpand}
           />
         </div>

@@ -138,7 +138,7 @@ async def create_job(request: CreateJobRequest, background_tasks: BackgroundTask
         raise HTTPException(status_code=400, detail=str(exc))
 
     has_image_input = bool(request.image_data) or bool(request.selected_image_id)
-    if model.accepts_image and not has_image_input:
+    if model.requires_image and not has_image_input:
         raise HTTPException(
             status_code=400,
             detail=f"Model '{request.model}' requires an image input.",
@@ -253,6 +253,11 @@ def _wf_to_response(wf) -> WorkflowResponse:
             model=s.model,
             num_outputs=s.num_outputs,
             prompt_template=s.prompt_template,
+            aspect_ratio=s.aspect_ratio,
+            duration=s.duration,
+            save_audio=s.save_audio,
+            initial_image_ids=s.initial_image_ids,
+            source_step_index=s.source_step_index,
         ) for s in wf.steps],
         slot_lists=wf.slot_lists,
         schedule_value=wf.schedule_value,
@@ -358,3 +363,10 @@ def get_workflow_run(workflow_id: str, run_id: str):
 def get_workflow_images(workflow_id: str):
     images = workflow_service.get_workflow_images(workflow_id)
     return [ImageResponse(**img) for img in images]
+
+
+@app.delete("/workflows/{workflow_id}/images/{image_id}")
+def delete_workflow_image(workflow_id: str, image_id: str):
+    if not workflow_service.delete_workflow_image(workflow_id, image_id):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return {"ok": True}

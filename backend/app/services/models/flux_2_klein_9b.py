@@ -30,6 +30,10 @@ class FluxKlein9bModel(ImageModel):
     def is_multi_reference(self) -> bool:
         return True
 
+    @property
+    def supports_aspect_ratio(self) -> bool:
+        return True
+
     def generate(self, prompt: str, image_bytes: Optional[bytes] = None) -> bytes:
         raise NotImplementedError("FluxKlein9bModel uses generate_multi(), not generate()")
 
