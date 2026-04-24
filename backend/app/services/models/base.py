@@ -114,6 +114,11 @@ class ImageModel(ABC):
         """Whether this model accepts an aspect_ratio parameter in generate()."""
         return False
 
+    @property
+    def supports_captions(self) -> bool:
+        """Whether this model accepts language and caption_size parameters in generate()."""
+        return False
+
     @abstractmethod
     def generate(self, prompt: str, image_bytes: Optional[bytes] = None) -> bytes:
         """Run the model and return raw image bytes."""

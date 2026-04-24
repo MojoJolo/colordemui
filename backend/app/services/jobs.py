@@ -77,6 +77,8 @@ def create_job(
     lora_scale: float = 0.5,
     hf_api_token: Optional[str] = None,
     prompt_upsampling: bool = False,
+    language: str = "english",
+    caption_size: int = 40,
 ) -> JobRecord:
     job_id = str(uuid.uuid4())
     model = model_registry.get_model(model_name)
@@ -105,6 +107,8 @@ def create_job(
             seed=seed,
             num_ref_images=len(image_data or []),
             aspect_ratio=aspect_ratio,
+            language=language,
+            caption_size=caption_size,
         )
     elif selected_image_id or first_frame_data:
         # First frame from gallery or uploaded data URI (e.g. for p-video)
@@ -147,6 +151,8 @@ def create_job(
             duration=duration,
             aspect_ratio=aspect_ratio,
             save_audio=save_audio,
+            language=language,
+            caption_size=caption_size,
         )
     elif image_data:
         # Per-image reference: one ImageRecord per image
@@ -168,6 +174,8 @@ def create_job(
             images=images,
             model=model_name,
             has_ref_image=True,
+            language=language,
+            caption_size=caption_size,
         )
     else:
         images = [
@@ -205,6 +213,8 @@ def create_job(
             hf_api_token=hf_api_token,
             prompt_upsampling=prompt_upsampling,
             seed=seed,
+            language=language,
+            caption_size=caption_size,
         )
 
     storage.save_job(job)
@@ -311,6 +321,9 @@ async def run_job(job_id: str) -> None:
                 image_bytes: bytes = await loop.run_in_executor(_executor, fn)
             elif model.supports_aspect_ratio:
                 fn = functools.partial(model.generate, image.prompt, ref_image_bytes, job.aspect_ratio)
+                image_bytes: bytes = await loop.run_in_executor(_executor, fn)
+            elif model.supports_captions:
+                fn = functools.partial(model.generate, image.prompt, ref_image_bytes, job.language, job.caption_size)
                 image_bytes: bytes = await loop.run_in_executor(_executor, fn)
             else:
                 image_bytes: bytes = await loop.run_in_executor(

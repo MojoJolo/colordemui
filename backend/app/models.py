@@ -44,6 +44,8 @@ class JobRecord(BaseModel):
     lora_scale: float = 0.5
     hf_api_token: Optional[str] = None
     prompt_upsampling: bool = False
+    language: str = "english"
+    caption_size: int = 40
 
 
 # ---------------------------------------------------------------------------
