@@ -2,7 +2,20 @@ import io
 import os
 from typing import Optional
 
+import replicate as replicate_client
+
 from app.services.models.base import ImageModel
+
+_cached_versioned_id: Optional[str] = None
+
+
+def _resolve_model_id(model_id: str) -> str:
+    global _cached_versioned_id
+    if _cached_versioned_id is None:
+        model = replicate_client.models.get(model_id)
+        version = model.latest_version
+        _cached_versioned_id = f"{model_id}:{version.id}" if version else model_id
+    return _cached_versioned_id
 
 
 class TikTokCaptionsModel(ImageModel):
@@ -61,7 +74,7 @@ class TikTokCaptionsModel(ImageModel):
         print(f"[tiktok-captions] language={language!r} caption_size={caption_size} initial_prompt={prompt!r}")
 
         output = self._replicate_run(
-            self.model_id,
+            _resolve_model_id(self.model_id),
             input=payload,
             file_encoding_strategy="base64",
         )
