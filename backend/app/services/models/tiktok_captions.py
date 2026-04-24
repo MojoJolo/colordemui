@@ -1,7 +1,5 @@
 import io
 import os
-import subprocess
-import tempfile
 from typing import Optional
 
 from app.services.models.base import ImageModel
@@ -39,7 +37,6 @@ class TikTokCaptionsModel(ImageModel):
         image_bytes: Optional[bytes] = None,
         language: str = "english",
         caption_size: int = 40,
-        save_audio: bool = True,
     ) -> bytes:
         if not os.environ.get("REPLICATE_API_TOKEN"):
             raise ValueError(
@@ -61,34 +58,11 @@ class TikTokCaptionsModel(ImageModel):
         if prompt:
             payload["initial_prompt"] = prompt
 
-        print(f"[tiktok-captions] language={language!r} caption_size={caption_size} save_audio={save_audio} initial_prompt={prompt!r}")
+        print(f"[tiktok-captions] language={language!r} caption_size={caption_size} initial_prompt={prompt!r}")
 
         output = self._replicate_run(
             self.model_id,
             input=payload,
             file_encoding_strategy="base64",
         )
-        result_bytes = self._extract_bytes(output)
-
-        if not save_audio:
-            result_bytes = self._strip_audio(result_bytes)
-
-        return result_bytes
-
-    @staticmethod
-    def _strip_audio(video_bytes: bytes) -> bytes:
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_in:
-            tmp_in.write(video_bytes)
-            tmp_in_path = tmp_in.name
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_out:
-            tmp_out_path = tmp_out.name
-        try:
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", tmp_in_path, "-an", "-c:v", "copy", tmp_out_path],
-                check=True,
-                capture_output=True,
-            )
-            return open(tmp_out_path, "rb").read()
-        finally:
-            os.unlink(tmp_in_path)
-            os.unlink(tmp_out_path)
+        return self._extract_bytes(output)
