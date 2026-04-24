@@ -13,7 +13,7 @@ export default function TikTokCaptionsForm({ onGenerate, isGenerating, images })
   const [selectedVideoId, setSelectedVideoId] = useState(null);
   const [videoDataUrl, setVideoDataUrl] = useState(null);
   const [videoName, setVideoName] = useState("");
-  const [language, setLanguage] = useState("english");
+  const [language, setLanguage] = useState("en");
   const [captionSize, setCaptionSize] = useState(40);
   const [initialPrompt, setInitialPrompt] = useState("");
   const fileInputRef = useRef(null);

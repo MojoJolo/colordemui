@@ -48,7 +48,7 @@ class TikTokCaptionsModel(ImageModel):
         self,
         prompt: str,
         image_bytes: Optional[bytes] = None,
-        language: str = "english",
+        language: str = "en",
         caption_size: int = 40,
     ) -> bytes:
         if not os.environ.get("REPLICATE_API_TOKEN"):
