@@ -2,13 +2,30 @@ import { useRef, useState } from "react";
 
 const MAX_PIXELS = 1_000_000;
 
+const ASPECT_RATIO_VALUES = [
+  { value: "16:9", ratio: 16 / 9 },
+  { value: "9:16", ratio: 9 / 16 },
+  { value: "1:1",  ratio: 1 },
+  { value: "4:3",  ratio: 4 / 3 },
+  { value: "3:4",  ratio: 3 / 4 },
+];
+
+function detectClosestAspectRatio(w, h) {
+  const r = w / h;
+  return ASPECT_RATIO_VALUES.reduce((best, candidate) =>
+    Math.abs(r - candidate.ratio) < Math.abs(r - best.ratio) ? candidate : best
+  ).value;
+}
+
 function scaleViaCanvas(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const total = img.width * img.height;
-      let w = img.width;
-      let h = img.height;
+      const origW = img.width;
+      const origH = img.height;
+      const total = origW * origH;
+      let w = origW;
+      let h = origH;
       if (total > MAX_PIXELS) {
         const s = Math.sqrt(MAX_PIXELS / total);
         w = Math.round(w * s);
@@ -18,10 +35,22 @@ function scaleViaCanvas(file) {
       canvas.width = w;
       canvas.height = h;
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL("image/png"));
+      resolve({ dataUrl: canvas.toDataURL("image/png"), origW, origH });
     };
     img.onerror = reject;
     img.src = URL.createObjectURL(file);
+  });
+}
+
+function getVideoDimensions(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.onloadedmetadata = () => {
+      resolve({ origW: video.videoWidth, origH: video.videoHeight });
+      URL.revokeObjectURL(video.src);
+    };
+    video.onerror = reject;
+    video.src = URL.createObjectURL(file);
   });
 }
 
@@ -40,10 +69,13 @@ function FrameSlot({ label, optional, candidates, selectedId, onSelectId, upload
   async function handleFile(file) {
     if (!file) return;
     try {
-      const dataUrl = file.type.startsWith("video/")
-        ? await readFileAsDataUrl(file)
-        : await scaleViaCanvas(file);
-      onUpload(dataUrl);
+      if (file.type.startsWith("video/")) {
+        const [dataUrl, { origW, origH }] = await Promise.all([readFileAsDataUrl(file), getVideoDimensions(file)]);
+        onUpload(dataUrl, origW, origH);
+      } else {
+        const { dataUrl, origW, origH } = await scaleViaCanvas(file);
+        onUpload(dataUrl, origW, origH);
+      }
     } catch (e) {
       console.error("Failed to load file:", e);
     }
@@ -129,20 +161,20 @@ function FrameSlot({ label, optional, candidates, selectedId, onSelectId, upload
   );
 }
 
+const ASPECT_RATIOS = [
+  { value: "16:9", label: "16:9", desc: "Wide" },
+  { value: "9:16", label: "9:16", desc: "Reels" },
+  { value: "1:1",  label: "1:1",  desc: "Square" },
+  { value: "4:3",  label: "4:3",  desc: "Classic" },
+  { value: "3:4",  label: "3:4",  desc: "Portrait" },
+];
+
 export default function GrokVideoForm({ onGenerate, isGenerating, images }) {
   const [prompt, setPrompt] = useState("");
   const [selectedImageId, setSelectedImageId] = useState(null);
   const [firstFrameDataUrl, setFirstFrameDataUrl] = useState(null);
   const [duration, setDuration] = useState(5);
   const [aspectRatio, setAspectRatio] = useState("16:9");
-
-  const ASPECT_RATIOS = [
-    { value: "16:9",  label: "16:9",  desc: "Wide" },
-    { value: "9:16",  label: "9:16",  desc: "Reels" },
-    { value: "1:1",   label: "1:1",   desc: "Square" },
-    { value: "4:3",   label: "4:3",   desc: "Classic" },
-    { value: "3:4",   label: "3:4",   desc: "Portrait" },
-  ];
 
   const candidates = images.filter(
     (img) =>
@@ -176,9 +208,27 @@ export default function GrokVideoForm({ onGenerate, isGenerating, images }) {
         optional
         candidates={candidates}
         selectedId={selectedImageId}
-        onSelectId={setSelectedImageId}
+        onSelectId={(id) => {
+          setSelectedImageId(id);
+          if (!id) return;
+          const src = candidates.find((c) => c.image_id === id);
+          if (!src?.url) return;
+          if (src.filename?.endsWith(".mp4")) {
+            const vid = document.createElement("video");
+            vid.onloadedmetadata = () => setAspectRatio(detectClosestAspectRatio(vid.videoWidth, vid.videoHeight));
+            vid.src = src.url;
+          } else {
+            const el = new Image();
+            el.onload = () => setAspectRatio(detectClosestAspectRatio(el.width, el.height));
+            el.src = src.url;
+          }
+        }}
         uploadedDataUrl={firstFrameDataUrl}
-        onUpload={(dataUrl) => { setFirstFrameDataUrl(dataUrl); setSelectedImageId(null); }}
+        onUpload={(dataUrl, w, h) => {
+          setFirstFrameDataUrl(dataUrl);
+          setSelectedImageId(null);
+          if (w && h) setAspectRatio(detectClosestAspectRatio(w, h));
+        }}
         onClearUpload={() => setFirstFrameDataUrl(null)}
         disabled={isGenerating}
       />
