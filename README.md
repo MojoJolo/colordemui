@@ -13,10 +13,12 @@ using [Replicate's recraft-v3-svg model](https://replicate.com/recraft-ai/recraf
 
 ## Quick start
 
-### 1. Set your API token
+### 1. Set your API tokens
 
 ```bash
 export REPLICATE_API_TOKEN=your_token_here
+# Only needed for the Minimax H3 tab (fal.ai) — https://fal.ai/dashboard/keys
+export FAL_KEY=your_fal_key_here
 ```
 
 ### 2. Install backend dependencies
@@ -55,10 +57,11 @@ Open **http://localhost:5173** in your browser.
 
 ## Docker Compose
 
-Create a `.env` file in the repo root or export the variable in your shell:
+Create a `.env` file in the repo root or export the variables in your shell:
 
 ```bash
 export REPLICATE_API_TOKEN=your_token_here
+export FAL_KEY=your_fal_key_here
 ```
 
 Then start the app from the repo root:

@@ -5,6 +5,7 @@ import FluxKleinForm from "./components/FluxKleinForm";
 import ZImageTurboForm from "./components/ZImageTurboForm";
 import PVideoForm from "./components/PVideoForm";
 import GrokVideoForm from "./components/GrokVideoForm";
+import MinimaxH3Form from "./components/MinimaxH3Form";
 import NanoBanana2Form from "./components/NanoBanana2Form";
 import PImageLoraForm from "./components/PImageLoraForm";
 import PImageEditForm from "./components/PImageEditForm";
@@ -243,6 +244,13 @@ export default function App() {
             Grok Video
           </button>
           <button
+            className={`tab${activePage === "minimax-h3" ? " active" : ""}`}
+            onClick={() => setActivePage("minimax-h3")}
+            type="button"
+          >
+            Minimax H3
+          </button>
+          <button
             className={`tab${activePage === "nano-banana-2" ? " active" : ""}`}
             onClick={() => setActivePage("nano-banana-2")}
             type="button"
@@ -287,6 +295,9 @@ export default function App() {
         )}
         {activePage === "grok-video" && (
           <GrokVideoForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
+        )}
+        {activePage === "minimax-h3" && (
+          <MinimaxH3Form onGenerate={handleGenerate} isGenerating={isGenerating} />
         )}
         {activePage === "nano-banana-2" && (
           <NanoBanana2Form onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
