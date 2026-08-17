@@ -14,6 +14,7 @@ from app.services.models.tiktok_captions import TikTokCaptionsModel
 from app.services.models.merge_videos import MergeVideosModel
 from app.services.models.gpt_5_nano import Gpt5NanoModel
 from app.services.models.upload_image import UploadImageModel
+from app.services.models.minimax_h3 import MinimaxH3TextToVideoModel
 
 # ---------------------------------------------------------------------------
 # Registry — add new models here, nothing else needs to change.
@@ -32,6 +33,7 @@ _REGISTRY: Dict[str, ImageModel] = {
     "merge-videos": MergeVideosModel(),
     "gpt-5-nano": Gpt5NanoModel(),
     "upload-image": UploadImageModel(),
+    "minimax-h3": MinimaxH3TextToVideoModel(),
 }
 
 
