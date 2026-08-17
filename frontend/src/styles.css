@@ -1145,6 +1145,33 @@ body {
 }
 
 /* ============================================================
+   MiniMax H3 form — collapsible reference URL block
+   ============================================================ */
+.h3-refs {
+  border: 1px solid #e2e5ea;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  background: #fafafa;
+}
+
+.h3-refs summary {
+  cursor: pointer;
+}
+
+.h3-refs[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.h3-refs-hint {
+  font-size: 0.78rem;
+  color: #6b7280;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ============================================================
    P-Image LoRA form
    ============================================================ */
 .lora-text-input {

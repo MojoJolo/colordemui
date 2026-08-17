@@ -11,6 +11,7 @@ const DEFAULT_STEP = () => ({
   prompt_template: "",
   aspect_ratio: "9:16",
   duration: 5,
+  resolution: "2K",
   save_audio: true,
   initial_image_ids: [],
   source_step_index: null,
@@ -25,6 +26,7 @@ function normalizeStep(s) {
     ...s,
     aspect_ratio: s.aspect_ratio || "9:16",
     duration: s.duration ?? 5,
+    resolution: s.resolution || "2K",
     save_audio: s.save_audio ?? true,
     initial_image_ids: s.initial_image_ids || [],
     source_step_index: s.source_step_index ?? null,
@@ -349,6 +351,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           prompt_template: s.prompt_template,
           aspect_ratio: s.aspect_ratio || "9:16",
           duration: s.duration ?? 5,
+          resolution: s.resolution || "2K",
           save_audio: s.save_audio ?? true,
           initial_image_ids: s.initial_image_ids || [],
           source_step_index: s.source_step_index ?? null,
@@ -608,6 +611,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                   && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
                 const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio && !isUpload;
                 const showDuration = modelInfo && modelInfo.supports_duration;
+                const showResolution = modelInfo && modelInfo.supports_resolution;
                 const showRefPicker = modelInfo
                   && (modelInfo.is_multi_reference || modelInfo.is_text || modelInfo.is_upload);
                 const stepImageCount = (step.initial_image_ids || []).length;
@@ -711,6 +715,20 @@ export default function WorkflowConfigTab({ onExpand }) {
                               onChange={(e) => updateStep(i, "aspect_ratio", e.target.value)}
                             >
                               {["9:16", "1:1", "4:5", "16:9", "3:4", "2:3"].map((r) => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {showResolution && (
+                          <div className="wf-field">
+                            <label className="prompt-label">Resolution</label>
+                            <select
+                              className="klein-input"
+                              value={step.resolution || "2K"}
+                              onChange={(e) => updateStep(i, "resolution", e.target.value)}
+                            >
+                              {["768P", "1080P", "2K"].map((r) => (
                                 <option key={r} value={r}>{r}</option>
                               ))}
                             </select>

@@ -71,6 +71,10 @@ def create_job(
     aspect_ratio: str = "9:16",
     selected_last_frame_image_id: Optional[str] = None,
     save_audio: bool = True,
+    resolution: str = "2K",
+    reference_image_urls: Optional[List[str]] = None,
+    reference_video_urls: Optional[List[str]] = None,
+    reference_audio_urls: Optional[List[str]] = None,
     first_frame_data: Optional[str] = None,
     last_frame_data: Optional[str] = None,
     lora_weights: Optional[str] = None,
@@ -150,7 +154,11 @@ def create_job(
             has_ref_image=True,
             duration=duration,
             aspect_ratio=aspect_ratio,
+            resolution=resolution,
             save_audio=save_audio,
+            reference_image_urls=reference_image_urls or [],
+            reference_video_urls=reference_video_urls or [],
+            reference_audio_urls=reference_audio_urls or [],
             language=language,
             caption_size=caption_size,
         )
@@ -207,7 +215,11 @@ def create_job(
             has_ref_image=False,
             duration=duration,
             aspect_ratio=aspect_ratio,
+            resolution=resolution,
             save_audio=save_audio,
+            reference_image_urls=reference_image_urls or [],
+            reference_video_urls=reference_video_urls or [],
+            reference_audio_urls=reference_audio_urls or [],
             lora_weights=lora_weights,
             lora_scale=lora_scale,
             hf_api_token=hf_api_token,
@@ -339,7 +351,17 @@ async def run_job(job_id: str) -> None:
             if model.supports_duration:
                 lf_path = storage.last_frame_path_for_image(image.image_id)
                 last_frame_bytes = lf_path.read_bytes() if lf_path.exists() else None
-                fn = functools.partial(model.generate, image.prompt, ref_image_bytes, job.duration, job.aspect_ratio, last_frame_bytes, job.save_audio)
+                # Params beyond the six positional ones are opt-in per model
+                extra = {}
+                if model.supports_resolution:
+                    extra["resolution"] = job.resolution
+                if model.supports_reference_urls:
+                    extra.update(
+                        reference_image_urls=job.reference_image_urls,
+                        reference_video_urls=job.reference_video_urls,
+                        reference_audio_urls=job.reference_audio_urls,
+                    )
+                fn = functools.partial(model.generate, image.prompt, ref_image_bytes, job.duration, job.aspect_ratio, last_frame_bytes, job.save_audio, **extra)
                 image_bytes: bytes = await loop.run_in_executor(_executor, fn)
             elif model.supports_lora:
                 fn = functools.partial(
