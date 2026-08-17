@@ -221,6 +221,41 @@ def create_job(
     return job
 
 
+def create_upload_record(image_data: str, label: str = "uploaded image") -> ImageResponse:
+    """
+    Store a user-uploaded image as a finished gallery entry so it can be
+    referenced anywhere a generated image can — in particular by image_id from
+    a workflow step's initial images.
+    """
+    raw = image_data.split("base64,")[-1]
+    img_bytes = normalize_image(base64.b64decode(raw))
+
+    image_id = str(uuid.uuid4())
+    filename = f"{image_id}.png"
+    storage.GENERATED_DIR.mkdir(exist_ok=True)
+    storage.image_file_path(filename).write_bytes(img_bytes)
+
+    image = ImageRecord(
+        image_id=image_id,
+        prompt=label,
+        filename=filename,
+        status=ImageStatus.done,
+        created_at=utcnow(),
+        model="upload",
+    )
+    job = JobRecord(
+        job_id=str(uuid.uuid4()),
+        status=JobStatus.done,
+        created_at=utcnow(),
+        total=1,
+        completed=1,
+        images=[image],
+        model="upload",
+    )
+    storage.save_job(job)
+    return _image_to_response(image)
+
+
 # ---------------------------------------------------------------------------
 # Background runner
 # ---------------------------------------------------------------------------
@@ -429,7 +464,7 @@ def delete_selected_images() -> None:
 # ---------------------------------------------------------------------------
 
 def generate_lora_zip(trigger_word: str = "") -> Optional[io.BytesIO]:
-    _SKIP_EXTS = (".svg", ".mp4", ".webm", ".mov")
+    _SKIP_EXTS = (".svg", ".mp4", ".webm", ".mov", ".txt")
     selected = [
         img for job in storage.load_all_jobs()
         for img in job.images
@@ -458,12 +493,12 @@ def generate_lora_zip(trigger_word: str = "") -> Optional[io.BytesIO]:
 
 
 def generate_pdf() -> Optional[Path]:
-    _VIDEO_EXTS = (".mp4", ".webm", ".mov")
+    _NON_IMAGE_EXTS = (".mp4", ".webm", ".mov", ".txt")
     selected = [
         img for job in storage.load_all_jobs()
         for img in job.images
         if img.selected and img.filename and img.status == ImageStatus.done
-        and not img.filename.endswith(_VIDEO_EXTS)
+        and not img.filename.endswith(_NON_IMAGE_EXTS)
     ]
     if not selected:
         return None

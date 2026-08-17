@@ -6,6 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     libcairo2 \
     libgdk-pixbuf-2.0-0 \
     libpango-1.0-0 \

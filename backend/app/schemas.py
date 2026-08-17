@@ -63,6 +63,9 @@ class WorkflowStepRequest(BaseModel):
     save_audio: bool = True
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
+    merge_source_steps: List[int] = []
+    language: str = "english"
+    caption_size: int = 40
 
 
 class WorkflowRequest(BaseModel):
@@ -84,6 +87,9 @@ class WorkflowStepResponse(BaseModel):
     save_audio: bool = True
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
+    merge_source_steps: List[int] = []
+    language: str = "english"
+    caption_size: int = 40
 
 
 class WorkflowResponse(BaseModel):

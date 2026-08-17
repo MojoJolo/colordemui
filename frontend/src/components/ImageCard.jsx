@@ -1,9 +1,25 @@
 import { useState, useRef, useEffect } from "react";
+import { isTextFile, isVideoFile } from "../mediaTypes";
 
 export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
   const { status, url, prompt, selected, error } = image;
   const [copied, setCopied] = useState(false);
+  const [textOutput, setTextOutput] = useState(null);
   const videoRef = useRef(null);
+
+  const isVideo = isVideoFile(image.filename);
+  const isText = isTextFile(image.filename);
+
+  // Text outputs are files too — fetch the contents so the card can show them
+  useEffect(() => {
+    if (!isText || !url || status !== "done") return;
+    let cancelled = false;
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(r.statusText))))
+      .then((t) => { if (!cancelled) setTextOutput(t); })
+      .catch(() => { if (!cancelled) setTextOutput("(could not load text)"); });
+    return () => { cancelled = true; };
+  }, [isText, url, status]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -27,7 +43,8 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
   const isPending = status === "pending";
 
   function handleCopyPrompt() {
-    const text = prompt ?? "";
+    // For a text output the generated text is the useful thing to copy, not the prompt
+    const text = (isText ? textOutput : prompt) ?? "";
     const markCopied = () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -118,7 +135,15 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
       {/* Image preview area */}
       <div className="image-preview">
         {isDone && url ? (
-          image.filename?.endsWith(".mp4") ? (
+          isText ? (
+            <div
+              className="image-text-output expandable"
+              onClick={() => onExpand && onExpand(image)}
+              title="Click to expand"
+            >
+              {textOutput ?? "Loading…"}
+            </div>
+          ) : isVideo ? (
             <video
               ref={videoRef}
               muted
@@ -181,12 +206,12 @@ export default function ImageCard({ image, onSelect, onDelete, onExpand }) {
             type="button"
             className="btn btn-icon btn-copy"
             onClick={handleCopyPrompt}
-            title="Copy prompt"
-            aria-label="Copy prompt"
+            title={isText ? "Copy text" : "Copy prompt"}
+            aria-label={isText ? "Copy text" : "Copy prompt"}
           >
             {copied ? "✓" : "⎘"}
           </button>
-          {isDone && image.filename?.endsWith(".mp4") && (
+          {isDone && isVideo && (
             <a
               href={url}
               download={image.filename}

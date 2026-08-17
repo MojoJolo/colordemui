@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { isPickableImage } from "../mediaTypes";
 
 const ASPECT_RATIOS = [
   { value: "9:16",  label: "9:16",  desc: "Reels" },
@@ -86,9 +87,7 @@ export default function NanoBanana2Form({ onGenerate, isGenerating, images = [] 
   const [uploadError, setUploadError] = useState(null);
   const fileInputRef = useRef(null);
 
-  const candidates = images.filter(
-    (img) => img.status === "done" && img.url && !img.filename?.endsWith(".mp4")
-  );
+  const candidates = images.filter(isPickableImage);
 
   const addedGalleryIds = new Set(
     refImages.filter((r) => r.galleryId).map((r) => r.galleryId)
