@@ -1479,6 +1479,39 @@ body {
   gap: 0.4rem;
 }
 
+.wf-merge-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.wf-merge-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.wf-merge-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #e2e5ea;
+  border-radius: 6px;
+  background: #f9fafb;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.wf-merge-option:has(input:checked) {
+  border-color: #6366f1;
+  background: #eef2ff;
+}
+
+.wf-merge-option-meta {
+  color: #6b7280;
+}
+
 .wf-ref-picker-header {
   display: flex;
   align-items: center;

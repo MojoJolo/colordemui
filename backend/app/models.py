@@ -68,6 +68,9 @@ class WorkflowStep(BaseModel):
     save_audio: bool = True
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None  # None = use previous step's output
+    merge_source_steps: List[int] = []       # merger steps: [] = all preceding video steps
+    language: str = "english"
+    caption_size: int = 40
 
 
 class WorkflowConfig(BaseModel):

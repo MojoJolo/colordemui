@@ -95,6 +95,11 @@ class ImageModel(ABC):
         return False
 
     @property
+    def is_merger(self) -> bool:
+        """True if this model combines the outputs of earlier steps into one file."""
+        return False
+
+    @property
     def supports_duration(self) -> bool:
         """Whether this model accepts a duration parameter."""
         return False

@@ -176,6 +176,12 @@ export async function updateWorkflow(workflowId, payload) {
   );
 }
 
+export async function duplicateWorkflow(workflowId) {
+  return handleResponse(
+    await fetch(`/workflows/${workflowId}/duplicate`, { method: "POST", headers: authHeaders() })
+  );
+}
+
 export async function deleteWorkflow(workflowId) {
   return handleResponse(
     await fetch(`/workflows/${workflowId}`, { method: "DELETE", headers: authHeaders() })

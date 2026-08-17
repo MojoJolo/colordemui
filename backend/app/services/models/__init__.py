@@ -11,6 +11,7 @@ from app.services.models.p_image_edit import PImageEditModel
 from app.services.models.grok_video import GrokVideoModel
 from app.services.models.nano_banana_2 import NanoBanana2Model
 from app.services.models.tiktok_captions import TikTokCaptionsModel
+from app.services.models.merge_videos import MergeVideosModel
 
 # ---------------------------------------------------------------------------
 # Registry — add new models here, nothing else needs to change.
@@ -26,6 +27,7 @@ _REGISTRY: Dict[str, ImageModel] = {
     "grok-video": GrokVideoModel(),
     "nano-banana-2": NanoBanana2Model(),
     "tiktok-captions": TikTokCaptionsModel(),
+    "merge-videos": MergeVideosModel(),
 }
 
 
@@ -44,8 +46,10 @@ def list_models() -> List[dict]:
             "accepts_image": model.accepts_image,
             "requires_image": model.requires_image,
             "is_multi_reference": model.is_multi_reference,
+            "is_merger": model.is_merger,
             "supports_aspect_ratio": model.supports_aspect_ratio,
             "supports_duration": model.supports_duration,
+            "supports_captions": model.supports_captions,
             "output_extension": model.output_extension,
         }
         for name, model in _REGISTRY.items()

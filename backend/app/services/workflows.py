@@ -102,6 +102,35 @@ def update_workflow(workflow_id: str, request) -> Optional[WorkflowConfig]:
     return wf
 
 
+def duplicate_workflow(workflow_id: str) -> Optional[WorkflowConfig]:
+    """
+    Clone a workflow's configuration under a new id and slug. Run history is not
+    copied, and the copy starts disabled so it does not fire on the shared
+    schedule before it has been reviewed.
+    """
+    src = workflow_storage.load_workflow(workflow_id)
+    if not src:
+        return None
+
+    now = utcnow()
+    name = f"{src.name} (copy)"
+    copy = WorkflowConfig(
+        workflow_id=str(uuid.uuid4()),
+        name=name,
+        slug=_unique_slug(name),
+        # Fresh step_ids so the copy's runs never collide with the original's
+        steps=[s.model_copy(update={"step_id": str(uuid.uuid4())}, deep=True) for s in src.steps],
+        slot_lists={slot: list(words) for slot, words in src.slot_lists.items()},
+        schedule_value=src.schedule_value,
+        schedule_unit=src.schedule_unit,
+        enabled=False,
+        created_at=now,
+        updated_at=now,
+    )
+    workflow_storage.save_workflow(copy)
+    return copy
+
+
 def delete_workflow(workflow_id: str) -> bool:
     return workflow_storage.delete_workflow(workflow_id)
 
@@ -114,23 +143,85 @@ def get_workflow(workflow_id: str) -> Optional[WorkflowConfig]:
     return workflow_storage.load_workflow(workflow_id)
 
 
+def _is_merger_model(name: str) -> bool:
+    try:
+        return model_registry.get_model(name).is_merger
+    except ValueError:
+        return False
+
+
 def _build_step(s) -> WorkflowStep:
     return WorkflowStep(
         step_id=s.step_id or str(uuid.uuid4()),
         model=s.model,
-        num_outputs=s.num_outputs,
+        # A merger always produces exactly one combined file
+        num_outputs=1 if _is_merger_model(s.model) else s.num_outputs,
         prompt_template=s.prompt_template,
         aspect_ratio=getattr(s, "aspect_ratio", "9:16"),
         duration=getattr(s, "duration", 5),
         save_audio=getattr(s, "save_audio", True),
         initial_image_ids=getattr(s, "initial_image_ids", []),
         source_step_index=getattr(s, "source_step_index", None),
+        merge_source_steps=getattr(s, "merge_source_steps", []),
+        language=getattr(s, "language", "english"),
+        caption_size=getattr(s, "caption_size", 40),
     )
 
 
 # ---------------------------------------------------------------------------
 # Execution
 # ---------------------------------------------------------------------------
+
+def _produces_video(step: WorkflowStep) -> bool:
+    try:
+        return model_registry.get_model(step.model).output_extension == ".mp4"
+    except ValueError:
+        return False
+
+
+def _collect_merge_clips(
+    step: WorkflowStep,
+    index: int,
+    wf: WorkflowConfig,
+    step_outputs: dict,
+) -> List[bytes]:
+    """Gather the videos a merger step should join, in playback order."""
+    sources = [s for s in step.merge_source_steps if 0 <= s < index]
+    if not sources:
+        sources = [s for s in range(index) if _produces_video(wf.steps[s])]
+    if not sources:
+        raise ValueError(
+            f"Step {index + 1} merges videos but no earlier step produces video output."
+        )
+
+    clips: List[bytes] = []
+    for s in sources:
+        if not _produces_video(wf.steps[s]):
+            raise ValueError(
+                f"Step {index + 1} is set to merge Step {s + 1}, "
+                f"but '{wf.steps[s].model}' does not produce video."
+            )
+        clips.extend(step_outputs.get(s, []))
+
+    if len(clips) < 2:
+        picked = ", ".join(f"Step {s + 1}" for s in sources)
+        raise ValueError(
+            f"Step {index + 1} needs at least 2 videos to merge but got {len(clips)} "
+            f"from {picked}. Increase that step's Outputs or select more source steps."
+        )
+    return clips
+
+
+def _generate_kwargs(model, step: WorkflowStep) -> dict:
+    kwargs = {}
+    if model.supports_duration:
+        kwargs.update(duration=step.duration, save_audio=step.save_audio)
+    if model.supports_aspect_ratio:
+        kwargs["aspect_ratio"] = step.aspect_ratio
+    if model.supports_captions:
+        kwargs.update(language=step.language, caption_size=step.caption_size)
+    return kwargs
+
 
 def run_workflow(workflow_id: str, run_id: str) -> None:
     wf = workflow_storage.load_workflow(workflow_id)
@@ -174,23 +265,25 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
 
         produced_bytes: List[bytes] = []
         try:
-            for j in range(step.num_outputs):
-                if model.is_multi_reference:
-                    ref_images = ref_bytes if ref_bytes else _load_images_by_ids(step.initial_image_ids)
-                    if not ref_images:
-                        raise ValueError(
-                            f"Step {i + 1} uses '{step.model}' which requires reference images, "
-                            "but none are available from the source step or configured initial images."
-                        )
-                    img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
-                elif ref_bytes and model.accepts_image:
-                    ref = ref_bytes[j % len(ref_bytes)]
-                    kwargs = {"duration": step.duration, "save_audio": step.save_audio} if model.supports_duration else {}
-                    img_bytes = model.generate(prompt, ref, **kwargs)
-                else:
-                    kwargs = {"duration": step.duration, "save_audio": step.save_audio} if model.supports_duration else {}
-                    img_bytes = model.generate(prompt, None, **kwargs)
-                produced_bytes.append(img_bytes)
+            if model.is_merger:
+                clips = _collect_merge_clips(step, i, wf, step_outputs)
+                produced_bytes.append(model.merge(clips))
+            else:
+                for j in range(step.num_outputs):
+                    if model.is_multi_reference:
+                        ref_images = ref_bytes if ref_bytes else _load_images_by_ids(step.initial_image_ids)
+                        if not ref_images:
+                            raise ValueError(
+                                f"Step {i + 1} uses '{step.model}' which requires reference images, "
+                                "but none are available from the source step or configured initial images."
+                            )
+                        img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
+                    elif ref_bytes and model.accepts_image:
+                        ref = ref_bytes[j % len(ref_bytes)]
+                        img_bytes = model.generate(prompt, ref, **_generate_kwargs(model, step))
+                    else:
+                        img_bytes = model.generate(prompt, None, **_generate_kwargs(model, step))
+                    produced_bytes.append(img_bytes)
 
             filenames = []
             for k, img_bytes in enumerate(produced_bytes):
