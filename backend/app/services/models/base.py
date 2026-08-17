@@ -130,6 +130,19 @@ class ImageModel(ABC):
         return False
 
     @property
+    def supports_resolution(self) -> bool:
+        """Whether this model accepts a resolution parameter in generate()."""
+        return False
+
+    @property
+    def supports_reference_urls(self) -> bool:
+        """
+        Whether this model accepts reference_image_urls / reference_video_urls /
+        reference_audio_urls lists of publicly reachable URLs.
+        """
+        return False
+
+    @property
     def supports_captions(self) -> bool:
         """Whether this model accepts language and caption_size parameters in generate()."""
         return False

@@ -9,6 +9,7 @@ from app.services.models.p_video import PVideoModel
 from app.services.models.p_image_lora import PImageLoraModel
 from app.services.models.p_image_edit import PImageEditModel
 from app.services.models.grok_video import GrokVideoModel
+from app.services.models.minimax_h3 import MiniMaxH3Model
 from app.services.models.nano_banana_2 import NanoBanana2Model
 from app.services.models.tiktok_captions import TikTokCaptionsModel
 from app.services.models.merge_videos import MergeVideosModel
@@ -27,6 +28,7 @@ _REGISTRY: Dict[str, ImageModel] = {
     "p-image-lora": PImageLoraModel(),
     "p-image-edit": PImageEditModel(),
     "grok-video": GrokVideoModel(),
+    "minimax-h3": MiniMaxH3Model(),
     "nano-banana-2": NanoBanana2Model(),
     "tiktok-captions": TikTokCaptionsModel(),
     "merge-videos": MergeVideosModel(),
@@ -56,6 +58,8 @@ def list_models() -> List[dict]:
             "supports_aspect_ratio": model.supports_aspect_ratio,
             "supports_duration": model.supports_duration,
             "supports_captions": model.supports_captions,
+            "supports_resolution": model.supports_resolution,
+            "supports_reference_urls": model.supports_reference_urls,
             "output_extension": model.output_extension,
         }
         for name, model in _REGISTRY.items()
