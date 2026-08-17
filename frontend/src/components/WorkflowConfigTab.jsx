@@ -250,6 +250,14 @@ export default function WorkflowConfigTab({ onExpand }) {
     return !!info && !!info.is_text;
   }
 
+  // Nearest earlier step that produces images, skipping text steps
+  function nearestImageStepBefore(index) {
+    for (let si = index - 1; si >= 0; si--) {
+      if (!isTextStep(si)) return si;
+    }
+    return null;
+  }
+
   // {text} / {stepN_text} placeholders that no preceding text step can satisfy
   function findBadTextRefs(template, index, textStepIdxs) {
     const bad = [];
@@ -586,17 +594,23 @@ export default function WorkflowConfigTab({ onExpand }) {
               {draft.steps.map((step, i) => {
                 const modelInfo = models.find((m) => m.id === step.model);
                 const isChained = i > 0;
-                // which step index provides ref images: explicit source or previous step
+                // Which step provides reference images: the explicit source, else the
+                // nearest earlier step that produces images — text steps are skipped,
+                // matching how the backend resolves it.
+                const defaultSourceIdx = nearestImageStepBefore(i);
                 const sourceIdx = (step.source_step_index != null && step.source_step_index < i)
                   ? step.source_step_index
-                  : (i > 0 ? i - 1 : null);
+                  : defaultSourceIdx;
                 const isMerger = !!(modelInfo && modelInfo.is_merger);
                 const isTextModel = !!(modelInfo && modelInfo.is_text);
-                const chainWarning = isChained && modelInfo && !isMerger
+                const isUpload = !!(modelInfo && modelInfo.is_upload);
+                const chainWarning = isChained && modelInfo && !isMerger && !isUpload
                   && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
-                const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio;
+                const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio && !isUpload;
                 const showDuration = modelInfo && modelInfo.supports_duration;
-                const showRefPicker = modelInfo && (modelInfo.is_multi_reference || modelInfo.is_text);
+                const showRefPicker = modelInfo
+                  && (modelInfo.is_multi_reference || modelInfo.is_text || modelInfo.is_upload);
+                const stepImageCount = (step.initial_image_ids || []).length;
                 const showCaptions = modelInfo && modelInfo.supports_captions;
                 // Earlier steps this merger can pull clips from, and how many clips that yields
                 const videoStepIdxs = isMerger
@@ -656,7 +670,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                             }
                           </select>
                         </div>
-                        {!isMerger && (
+                        {!isMerger && !isUpload && (
                           <div className="wf-field wf-field-outputs">
                             <label className="prompt-label">Outputs</label>
                             <input
@@ -669,20 +683,22 @@ export default function WorkflowConfigTab({ onExpand }) {
                             />
                           </div>
                         )}
-                        {!isMerger && i >= 2 && (
+                        {!isMerger && !isUpload && i >= 2 && (
                           <div className="wf-field">
                             <label className="prompt-label">From step</label>
                             <select
                               className="klein-input"
-                              value={step.source_step_index ?? i - 1}
+                              value={step.source_step_index ?? defaultSourceIdx ?? ""}
                               onChange={(e) => {
                                 const val = parseInt(e.target.value);
-                                updateStep(i, "source_step_index", val === i - 1 ? null : val);
+                                updateStep(i, "source_step_index", val === defaultSourceIdx ? null : val);
                               }}
                             >
-                              {draft.steps.slice(0, i).map((_, si) => (
-                                <option key={si} value={si}>Step {si + 1}</option>
-                              ))}
+                              {draft.steps.slice(0, i).map((_, si) => si)
+                                .filter((si) => !isTextStep(si))
+                                .map((si) => (
+                                  <option key={si} value={si}>Step {si + 1}</option>
+                                ))}
                             </select>
                           </div>
                         )}
@@ -753,7 +769,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                         )}
                       </div>
 
-                      {chainWarning && (
+                      {chainWarning && sourceIdx != null && (
                         <div className="wf-warning">
                           This model does not accept image input — Step {sourceIdx + 1}'s output will not be passed as reference.
                         </div>
@@ -763,8 +779,11 @@ export default function WorkflowConfigTab({ onExpand }) {
                         <div className="wf-ref-picker">
                           <div className="wf-ref-picker-header">
                             <label className="prompt-label">
-                              {isTextModel ? "Reference Image" : "Reference Images"}
-                              {isChained && (
+                              {isUpload ? "Images" : isTextModel ? "Reference Image" : "Reference Images"}
+                              {isUpload && (
+                                <span className="wf-ref-hint"> — later steps can use these with "From step → Step {i + 1}"</span>
+                              )}
+                              {!isUpload && isChained && sourceIdx != null && (
                                 <span className="wf-ref-hint"> — Step {sourceIdx + 1}'s output will be used; select below as fallback for Step 1</span>
                               )}
                             </label>
@@ -821,6 +840,11 @@ export default function WorkflowConfigTab({ onExpand }) {
                           {isTextModel && (
                             <p className="wf-hint">gpt-5-nano takes a single image — picking another replaces it.</p>
                           )}
+                          {isUpload && stepImageCount === 0 && (
+                            <div className="wf-warning">
+                              No image selected — this step will fail the run. Upload one or pick from above.
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -866,7 +890,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                         </div>
                       )}
 
-                      {!isMerger && (
+                      {!isMerger && !isUpload && (
                         <>
                           <label className="prompt-label">Prompt template</label>
                           <textarea

@@ -11,19 +11,22 @@ from app.services.storage import GENERATED_DIR
 from app.utils import utcnow
 
 
-def _load_images_by_ids(image_ids: List[str]) -> List[bytes]:
-    """Load image bytes from disk for the given image IDs."""
+def _filenames_by_ids(image_ids: List[str]) -> List[str]:
+    """Resolve image IDs to filenames relative to GENERATED_DIR, skipping missing files."""
     from app.services import jobs as job_service
     all_images = job_service.get_all_images()
     id_to_filename = {img.image_id: img.filename for img in all_images if img.filename}
     result = []
     for image_id in image_ids:
         filename = id_to_filename.get(image_id)
-        if filename:
-            path = GENERATED_DIR / filename
-            if path.exists():
-                result.append(path.read_bytes())
+        if filename and (GENERATED_DIR / filename).exists():
+            result.append(filename)
     return result
+
+
+def _load_images_by_ids(image_ids: List[str]) -> List[bytes]:
+    """Load image bytes from disk for the given image IDs."""
+    return [(GENERATED_DIR / f).read_bytes() for f in _filenames_by_ids(image_ids)]
 
 
 def _derive_slug(name: str) -> str:
@@ -150,12 +153,28 @@ def _is_merger_model(name: str) -> bool:
         return False
 
 
+def _is_upload_model(name: str) -> bool:
+    try:
+        return model_registry.get_model(name).is_upload
+    except ValueError:
+        return False
+
+
+def _step_num_outputs(s) -> int:
+    # A merger always produces exactly one combined file; an upload step produces
+    # exactly the images it holds. Keeping these accurate keeps run progress honest.
+    if _is_merger_model(s.model):
+        return 1
+    if _is_upload_model(s.model):
+        return max(1, len(getattr(s, "initial_image_ids", []) or []))
+    return s.num_outputs
+
+
 def _build_step(s) -> WorkflowStep:
     return WorkflowStep(
         step_id=s.step_id or str(uuid.uuid4()),
         model=s.model,
-        # A merger always produces exactly one combined file
-        num_outputs=1 if _is_merger_model(s.model) else s.num_outputs,
+        num_outputs=_step_num_outputs(s),
         prompt_template=s.prompt_template,
         aspect_ratio=getattr(s, "aspect_ratio", "9:16"),
         duration=getattr(s, "duration", 5),
@@ -336,7 +355,14 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
             ref_bytes = _resolve_ref_bytes(step, i, wf, step_outputs)
             if not ref_bytes and step.initial_image_ids:
                 ref_bytes = _load_images_by_ids(step.initial_image_ids)
-            if model.is_merger:
+            if model.is_upload:
+                produced_bytes = _load_images_by_ids(step.initial_image_ids)
+                if not produced_bytes:
+                    raise ValueError(
+                        f"Step {i + 1} supplies uploaded images but none are selected. "
+                        "Upload or pick an image on that step."
+                    )
+            elif model.is_merger:
                 clips = _collect_merge_clips(step, i, wf, step_outputs)
                 produced_bytes.append(model.merge(clips))
             else:
@@ -356,11 +382,15 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
                         img_bytes = model.generate(prompt, None, **_generate_kwargs(model, step))
                     produced_bytes.append(img_bytes)
 
-            filenames = []
-            for k, img_bytes in enumerate(produced_bytes):
-                fname = f"{run_id}_step{i}_{k}{model.output_extension}"
-                (output_dir / fname).write_bytes(img_bytes)
-                filenames.append(f"{wf.slug}/{fname}")
+            if model.is_upload:
+                # Point at the uploaded files instead of copying them into every run
+                filenames = _filenames_by_ids(step.initial_image_ids)
+            else:
+                filenames = []
+                for k, img_bytes in enumerate(produced_bytes):
+                    fname = f"{run_id}_step{i}_{k}{model.output_extension}"
+                    (output_dir / fname).write_bytes(img_bytes)
+                    filenames.append(f"{wf.slug}/{fname}")
 
             step_result.image_filenames = filenames
             step_result.status = "done"
@@ -403,6 +433,11 @@ def get_workflow_images(workflow_id: str) -> List[dict]:
     images = []
     for run in sorted(runs, key=lambda r: r.started_at, reverse=True):
         for si, sr in enumerate(run.step_results):
+            # Upload steps are inputs, not generated output — listing them would
+            # repeat the same image once per run, and deleting one from the
+            # gallery would remove the source the workflow depends on.
+            if si < len(wf.steps) and _is_upload_model(wf.steps[si].model):
+                continue
             prompt = run.resolved_prompts[si] if si < len(run.resolved_prompts) else ""
             for k, fname in enumerate(sr.image_filenames):
                 images.append({

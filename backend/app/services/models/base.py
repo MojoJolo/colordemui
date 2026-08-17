@@ -105,6 +105,11 @@ class ImageModel(ABC):
         return False
 
     @property
+    def is_upload(self) -> bool:
+        """True if this step supplies its configured images instead of generating any."""
+        return False
+
+    @property
     def supports_duration(self) -> bool:
         """Whether this model accepts a duration parameter."""
         return False
