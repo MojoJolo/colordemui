@@ -15,8 +15,31 @@ import ProgressPanel from "./components/ProgressPanel";
 import PromptForm from "./components/PromptForm";
 import Toolbar from "./components/Toolbar";
 import TikTokCaptionsForm from "./components/TikTokCaptionsForm";
+import Gpt5NanoForm from "./components/Gpt5NanoForm";
 import WorkflowConfigTab from "./components/WorkflowConfigTab";
+import { isTextFile, isVideoFile } from "./mediaTypes";
 import "./styles.css";
+
+// Text outputs are stored as .txt files, so the lightbox has to fetch them
+function TextOutputView({ image }) {
+  const [text, setText] = useState("Loading…");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(image.url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(r.statusText))))
+      .then((t) => { if (!cancelled) setText(t); })
+      .catch(() => { if (!cancelled) setText("(could not load text)"); });
+    return () => { cancelled = true; };
+  }, [image.url]);
+
+  return (
+    <div className="lightbox-text">
+      <p className="lightbox-text-prompt">{image.prompt}</p>
+      <pre className="lightbox-text-body">{text}</pre>
+    </div>
+  );
+}
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem("auth_token"));
@@ -265,6 +288,13 @@ export default function App() {
             TikTok Captions
           </button>
           <button
+            className={`tab${activePage === "gpt-5-nano" ? " active" : ""}`}
+            onClick={() => setActivePage("gpt-5-nano")}
+            type="button"
+          >
+            GPT-5 Nano
+          </button>
+          <button
             className={`tab${activePage === "workflow" ? " active" : ""}`}
             onClick={() => setActivePage("workflow")}
             type="button"
@@ -305,6 +335,9 @@ export default function App() {
         {activePage === "tiktok-captions" && (
           <TikTokCaptionsForm onGenerate={handleGenerate} isGenerating={isGenerating} />
         )}
+        {activePage === "gpt-5-nano" && (
+          <Gpt5NanoForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
+        )}
         {activePage === "workflow" && (
           <WorkflowConfigTab onExpand={setExpandedImage} />
         )}
@@ -339,7 +372,9 @@ export default function App() {
       {expandedImage && (
         <div className="lightbox-backdrop" onClick={() => setExpandedImage(null)}>
           <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
-            {expandedImage.filename?.endsWith(".mp4") ? (
+            {isTextFile(expandedImage.filename) ? (
+              <TextOutputView image={expandedImage} />
+            ) : isVideoFile(expandedImage.filename) ? (
               <video src={expandedImage.url} controls autoPlay loop />
             ) : (
               <img src={expandedImage.url} alt={expandedImage.prompt} />
@@ -351,7 +386,7 @@ export default function App() {
             >
               ✕
             </button>
-            {expandedImage.filename?.endsWith(".mp4") && (
+            {isVideoFile(expandedImage.filename) && (
               <a
                 href={expandedImage.url}
                 download={expandedImage.filename}

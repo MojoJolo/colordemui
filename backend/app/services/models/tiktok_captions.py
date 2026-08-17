@@ -21,7 +21,9 @@ class TikTokCaptionsModel(ImageModel):
 
     @property
     def accepts_image(self) -> bool:
-        return False
+        # The "image" input is the video to caption — lets workflow steps
+        # receive the previous step's video.
+        return True
 
     @property
     def requires_image(self) -> bool:

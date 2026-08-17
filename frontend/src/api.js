@@ -58,6 +58,17 @@ export async function getAllImages() {
   return handleResponse(await fetch("/images", { headers: authHeaders() }));
 }
 
+// Store an uploaded image as a gallery entry so it can be referenced by image_id
+export async function uploadImage(imageData, label) {
+  return handleResponse(
+    await fetch("/uploads", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ image_data: imageData, label }),
+    })
+  );
+}
+
 // Start a new generation job
 export async function createJob(prompts, model = "recraft-v3-svg", imageData = null, options = {}) {
   const {
@@ -173,6 +184,12 @@ export async function updateWorkflow(workflowId, payload) {
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     })
+  );
+}
+
+export async function duplicateWorkflow(workflowId) {
+  return handleResponse(
+    await fetch(`/workflows/${workflowId}/duplicate`, { method: "POST", headers: authHeaders() })
   );
 }
 

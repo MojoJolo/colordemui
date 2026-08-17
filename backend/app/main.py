@@ -122,6 +122,24 @@ def get_all_images():
     return job_service.get_all_images()
 
 
+class UploadRequest(BaseModel):
+    image_data: str  # base64 data URI
+    label: Optional[str] = None
+
+
+@app.post("/uploads", response_model=ImageResponse)
+def upload_image(request: UploadRequest):
+    """Store an uploaded image so it can be referenced by image_id, e.g. by a workflow step."""
+    if not request.image_data:
+        raise HTTPException(status_code=400, detail="No image data provided")
+    try:
+        return job_service.create_upload_record(
+            request.image_data, request.label or "uploaded image"
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read image: {exc}")
+
+
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
@@ -260,6 +278,9 @@ def _wf_to_response(wf) -> WorkflowResponse:
             save_audio=s.save_audio,
             initial_image_ids=s.initial_image_ids,
             source_step_index=s.source_step_index,
+            merge_source_steps=s.merge_source_steps,
+            language=s.language,
+            caption_size=s.caption_size,
         ) for s in wf.steps],
         slot_lists=wf.slot_lists,
         schedule_value=wf.schedule_value,
@@ -319,6 +340,15 @@ def update_workflow(workflow_id: str, request: WorkflowRequest):
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     scheduler_service.reschedule_workflow(wf)
+    return _wf_to_response(wf)
+
+
+@app.post("/workflows/{workflow_id}/duplicate", response_model=WorkflowResponse)
+def duplicate_workflow(workflow_id: str):
+    wf = workflow_service.duplicate_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    # The copy is created disabled, so there is nothing to schedule yet.
     return _wf_to_response(wf)
 
 

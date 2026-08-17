@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import ImageGrid from "./ImageGrid";
+import { scaleViaCanvas } from "./FrameSlot";
+import { isPickableImage, isTextFile, isVideoFile } from "../mediaTypes";
 
 const DEFAULT_STEP = () => ({
   step_id: null,
@@ -12,7 +14,25 @@ const DEFAULT_STEP = () => ({
   save_audio: true,
   initial_image_ids: [],
   source_step_index: null,
+  merge_source_steps: [],
+  language: "english",
+  caption_size: 40,
 });
+
+// Fill in fields missing from workflows saved before they existed
+function normalizeStep(s) {
+  return {
+    ...s,
+    aspect_ratio: s.aspect_ratio || "9:16",
+    duration: s.duration ?? 5,
+    save_audio: s.save_audio ?? true,
+    initial_image_ids: s.initial_image_ids || [],
+    source_step_index: s.source_step_index ?? null,
+    merge_source_steps: s.merge_source_steps || [],
+    language: s.language || "english",
+    caption_size: s.caption_size ?? 40,
+  };
+}
 
 const DEFAULT_WORKFLOW = () => ({
   name: "",
@@ -47,10 +67,13 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [wfImages, setWfImages] = useState([]);
   const [activeRunId, setActiveRunId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState(null);
   const [expandedRunId, setExpandedRunId] = useState(null);
+  const [uploadingStep, setUploadingStep] = useState(null);
   const pollRef = useRef(null);
+  const uploadInputRefs = useRef({});
 
   // Load models + workflows + all images on mount
   useEffect(() => {
@@ -102,14 +125,7 @@ export default function WorkflowConfigTab({ onExpand }) {
     setSelectedId(wf.workflow_id);
     setDraft({
       name: wf.name,
-      steps: wf.steps.map((s) => ({
-        ...s,
-        aspect_ratio: s.aspect_ratio || "9:16",
-        duration: s.duration ?? 5,
-        save_audio: s.save_audio ?? true,
-        initial_image_ids: s.initial_image_ids || [],
-        source_step_index: s.source_step_index ?? null,
-      })),
+      steps: wf.steps.map(normalizeStep),
       slot_lists: { ...wf.slot_lists },
       schedule_value: wf.schedule_value,
       schedule_unit: wf.schedule_unit,
@@ -145,8 +161,25 @@ export default function WorkflowConfigTab({ onExpand }) {
     setDraft((d) => ({ ...d, steps: [...d.steps, DEFAULT_STEP()] }));
   }
 
+  // Step references are positional, so they have to be remapped when the list changes
+  function remapStepRefs(steps, mapIndex) {
+    return steps.map((s) => ({
+      ...s,
+      source_step_index: s.source_step_index == null ? null : mapIndex(s.source_step_index),
+      merge_source_steps: (s.merge_source_steps || [])
+        .map(mapIndex)
+        .filter((i) => i != null),
+    }));
+  }
+
   function removeStep(index) {
-    setDraft((d) => ({ ...d, steps: d.steps.filter((_, i) => i !== index) }));
+    setDraft((d) => {
+      const steps = remapStepRefs(
+        d.steps.filter((_, i) => i !== index),
+        (i) => (i === index ? null : i > index ? i - 1 : i)
+      );
+      return { ...d, steps };
+    });
   }
 
   function moveStep(index, dir) {
@@ -155,7 +188,10 @@ export default function WorkflowConfigTab({ onExpand }) {
       const target = index + dir;
       if (target < 0 || target >= steps.length) return d;
       [steps[index], steps[target]] = [steps[target], steps[index]];
-      return { ...d, steps };
+      return {
+        ...d,
+        steps: remapStepRefs(steps, (i) => (i === index ? target : i === target ? index : i)),
+      };
     });
   }
 
@@ -201,7 +237,97 @@ export default function WorkflowConfigTab({ onExpand }) {
         referenced.add(m[1]);
       }
     }
-    return [...referenced].filter((s) => !(s in draft.slot_lists));
+    // {text} / {stepN_text} are upstream text outputs, not randomization slots
+    return [...referenced].filter(
+      (s) => !(s in draft.slot_lists) && !/^(?:step\d+_)?text$/.test(s)
+    );
+  }
+
+  // True when the step at `index` produces text a later prompt can splice in
+  function isTextStep(index) {
+    const step = draft && draft.steps[index];
+    const info = step && models.find((m) => m.id === step.model);
+    return !!info && !!info.is_text;
+  }
+
+  // Nearest earlier step that produces images, skipping text steps
+  function nearestImageStepBefore(index) {
+    for (let si = index - 1; si >= 0; si--) {
+      if (!isTextStep(si)) return si;
+    }
+    return null;
+  }
+
+  // {text} / {stepN_text} placeholders that no preceding text step can satisfy
+  function findBadTextRefs(template, index, textStepIdxs) {
+    const bad = [];
+    const regex = /\{(?:step(\d+)_)?text\}/g;
+    let m;
+    while ((m = regex.exec(template || "")) !== null) {
+      if (m[1] === undefined) {
+        if (textStepIdxs.length === 0) bad.push("{text}");
+      } else if (!textStepIdxs.includes(parseInt(m[1], 10) - 1)) {
+        bad.push(m[0]);
+      }
+    }
+    return [...new Set(bad)];
+  }
+
+  function toggleRefImage(stepIndex, imageId, single) {
+    const ids = draft.steps[stepIndex].initial_image_ids || [];
+    if (ids.includes(imageId)) {
+      updateStep(stepIndex, "initial_image_ids", ids.filter((id) => id !== imageId));
+    } else {
+      updateStep(stepIndex, "initial_image_ids", single ? [imageId] : [...ids, imageId]);
+    }
+  }
+
+  // Uploads become ordinary gallery entries, so the step just references the new id
+  async function handleStepUpload(stepIndex, files, single) {
+    if (!files || files.length === 0) return;
+    setUploadingStep(stepIndex);
+    setError(null);
+    try {
+      const selected = Array.from(files).slice(0, single ? 1 : files.length);
+      const uploaded = [];
+      for (const file of selected) {
+        const dataUrl = await scaleViaCanvas(file);
+        const img = await api.uploadImage(dataUrl, file.name);
+        uploaded.push(img.image_id);
+      }
+      setAllImages(await api.getAllImages());
+      const existing = draft.steps[stepIndex].initial_image_ids || [];
+      updateStep(
+        stepIndex,
+        "initial_image_ids",
+        single ? uploaded.slice(-1) : [...existing, ...uploaded]
+      );
+    } catch (e) {
+      setError(e.message || "Upload failed.");
+    } finally {
+      setUploadingStep(null);
+    }
+  }
+
+  // True when the step at `index` produces video output that a merger can consume
+  function isVideoStep(index) {
+    const step = draft && draft.steps[index];
+    const info = step && models.find((m) => m.id === step.model);
+    return !!info && info.output_extension === ".mp4";
+  }
+
+  function toggleMergeSource(stepIndex, sourceIndex) {
+    setDraft((d) => {
+      const steps = d.steps.map((s, i) => {
+        if (i !== stepIndex) return s;
+        const current = s.merge_source_steps || [];
+        const next = current.includes(sourceIndex)
+          ? current.filter((si) => si !== sourceIndex)
+          : [...current, sourceIndex].sort((a, b) => a - b);
+        return { ...s, merge_source_steps: next };
+      });
+      return { ...d, steps };
+    });
   }
 
   // ---- Save ----
@@ -226,6 +352,9 @@ export default function WorkflowConfigTab({ onExpand }) {
           save_audio: s.save_audio ?? true,
           initial_image_ids: s.initial_image_ids || [],
           source_step_index: s.source_step_index ?? null,
+          merge_source_steps: s.merge_source_steps || [],
+          language: s.language || "english",
+          caption_size: s.caption_size ?? 40,
         })),
         slot_lists: draft.slot_lists,
         schedule_value: draft.schedule_value,
@@ -243,12 +372,7 @@ export default function WorkflowConfigTab({ onExpand }) {
       setSelectedId(saved.workflow_id);
       setDraft({
         name: saved.name,
-        steps: saved.steps.map((s) => ({
-          ...s,
-          aspect_ratio: s.aspect_ratio || "9:16",
-          initial_image_ids: s.initial_image_ids || [],
-          source_step_index: s.source_step_index ?? null,
-        })),
+        steps: saved.steps.map(normalizeStep),
         slot_lists: { ...saved.slot_lists },
         schedule_value: saved.schedule_value,
         schedule_unit: saved.schedule_unit,
@@ -290,6 +414,23 @@ export default function WorkflowConfigTab({ onExpand }) {
       setError(e.message || "Trigger failed.");
     } finally {
       setTriggering(false);
+    }
+  }
+
+  // ---- Duplicate ----
+
+  async function handleDuplicate() {
+    if (!selectedId) return;
+    setDuplicating(true);
+    setError(null);
+    try {
+      const copy = await api.duplicateWorkflow(selectedId);
+      setWorkflows(await api.listWorkflows());
+      selectWorkflow(copy);
+    } catch (e) {
+      setError(e.message || "Duplicate failed.");
+    } finally {
+      setDuplicating(false);
     }
   }
 
@@ -453,14 +594,36 @@ export default function WorkflowConfigTab({ onExpand }) {
               {draft.steps.map((step, i) => {
                 const modelInfo = models.find((m) => m.id === step.model);
                 const isChained = i > 0;
-                // which step index provides ref images: explicit source or previous step
+                // Which step provides reference images: the explicit source, else the
+                // nearest earlier step that produces images — text steps are skipped,
+                // matching how the backend resolves it.
+                const defaultSourceIdx = nearestImageStepBefore(i);
                 const sourceIdx = (step.source_step_index != null && step.source_step_index < i)
                   ? step.source_step_index
-                  : (i > 0 ? i - 1 : null);
-                const chainWarning = isChained && modelInfo && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
-                const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio;
+                  : defaultSourceIdx;
+                const isMerger = !!(modelInfo && modelInfo.is_merger);
+                const isTextModel = !!(modelInfo && modelInfo.is_text);
+                const isUpload = !!(modelInfo && modelInfo.is_upload);
+                const chainWarning = isChained && modelInfo && !isMerger && !isUpload
+                  && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
+                const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio && !isUpload;
                 const showDuration = modelInfo && modelInfo.supports_duration;
-                const showRefPicker = modelInfo && modelInfo.is_multi_reference;
+                const showRefPicker = modelInfo
+                  && (modelInfo.is_multi_reference || modelInfo.is_text || modelInfo.is_upload);
+                const stepImageCount = (step.initial_image_ids || []).length;
+                const showCaptions = modelInfo && modelInfo.supports_captions;
+                // Earlier steps this merger can pull clips from, and how many clips that yields
+                const videoStepIdxs = isMerger
+                  ? draft.steps.slice(0, i).map((_, si) => si).filter(isVideoStep)
+                  : [];
+                const mergeSources = (step.merge_source_steps || []).filter((si) => si < i);
+                const effectiveSources = mergeSources.length ? mergeSources : videoStepIdxs;
+                const mergeClipCount = effectiveSources.reduce(
+                  (acc, si) => acc + (draft.steps[si]?.num_outputs || 0), 0
+                );
+                // Text placeholders can only refer to a text step that runs earlier
+                const textStepIdxs = draft.steps.slice(0, i).map((_, si) => si).filter(isTextStep);
+                const badTextRefs = findBadTextRefs(step.prompt_template, i, textStepIdxs);
                 return (
                   <div key={i} className="wf-step-card">
                     <div className="wf-step-header">
@@ -507,31 +670,35 @@ export default function WorkflowConfigTab({ onExpand }) {
                             }
                           </select>
                         </div>
-                        <div className="wf-field wf-field-outputs">
-                          <label className="prompt-label">Outputs</label>
-                          <input
-                            type="number"
-                            className="klein-input wf-num-input"
-                            min={1}
-                            max={4}
-                            value={step.num_outputs}
-                            onChange={(e) => updateStep(i, "num_outputs", Math.min(4, Math.max(1, parseInt(e.target.value) || 1)))}
-                          />
-                        </div>
-                        {i >= 2 && (
+                        {!isMerger && !isUpload && (
+                          <div className="wf-field wf-field-outputs">
+                            <label className="prompt-label">Outputs</label>
+                            <input
+                              type="number"
+                              className="klein-input wf-num-input"
+                              min={1}
+                              max={4}
+                              value={step.num_outputs}
+                              onChange={(e) => updateStep(i, "num_outputs", Math.min(4, Math.max(1, parseInt(e.target.value) || 1)))}
+                            />
+                          </div>
+                        )}
+                        {!isMerger && !isUpload && i >= 2 && (
                           <div className="wf-field">
                             <label className="prompt-label">From step</label>
                             <select
                               className="klein-input"
-                              value={step.source_step_index ?? i - 1}
+                              value={step.source_step_index ?? defaultSourceIdx ?? ""}
                               onChange={(e) => {
                                 const val = parseInt(e.target.value);
-                                updateStep(i, "source_step_index", val === i - 1 ? null : val);
+                                updateStep(i, "source_step_index", val === defaultSourceIdx ? null : val);
                               }}
                             >
-                              {draft.steps.slice(0, i).map((_, si) => (
-                                <option key={si} value={si}>Step {si + 1}</option>
-                              ))}
+                              {draft.steps.slice(0, i).map((_, si) => si)
+                                .filter((si) => !isTextStep(si))
+                                .map((si) => (
+                                  <option key={si} value={si}>Step {si + 1}</option>
+                                ))}
                             </select>
                           </div>
                         )}
@@ -574,9 +741,35 @@ export default function WorkflowConfigTab({ onExpand }) {
                             </label>
                           </div>
                         )}
+                        {showCaptions && (
+                          <div className="wf-field">
+                            <label className="prompt-label">Caption language</label>
+                            <input
+                              type="text"
+                              className="klein-input"
+                              value={step.language || "english"}
+                              onChange={(e) => updateStep(i, "language", e.target.value)}
+                              placeholder="english, french, auto…"
+                            />
+                          </div>
+                        )}
+                        {showCaptions && (
+                          <div className="wf-field">
+                            <label className="prompt-label">Caption size: {step.caption_size ?? 40}</label>
+                            <input
+                              type="range"
+                              min={10}
+                              max={100}
+                              step={5}
+                              value={step.caption_size ?? 40}
+                              onChange={(e) => updateStep(i, "caption_size", parseInt(e.target.value))}
+                              className="wf-duration-slider"
+                            />
+                          </div>
+                        )}
                       </div>
 
-                      {chainWarning && (
+                      {chainWarning && sourceIdx != null && (
                         <div className="wf-warning">
                           This model does not accept image input — Step {sourceIdx + 1}'s output will not be passed as reference.
                         </div>
@@ -586,26 +779,46 @@ export default function WorkflowConfigTab({ onExpand }) {
                         <div className="wf-ref-picker">
                           <div className="wf-ref-picker-header">
                             <label className="prompt-label">
-                              Reference Images
-                              {isChained && (
+                              {isUpload ? "Images" : isTextModel ? "Reference Image" : "Reference Images"}
+                              {isUpload && (
+                                <span className="wf-ref-hint"> — later steps can use these with "From step → Step {i + 1}"</span>
+                              )}
+                              {!isUpload && isChained && sourceIdx != null && (
                                 <span className="wf-ref-hint"> — Step {sourceIdx + 1}'s output will be used; select below as fallback for Step 1</span>
                               )}
                             </label>
-                            <button
-                              type="button"
-                              className="btn btn-secondary wf-btn-sm"
-                              onClick={() => api.getAllImages().then(setAllImages).catch(() => {})}
-                              title="Refresh image list"
-                            >↻</button>
+                            <div className="wf-ref-picker-actions">
+                              <button
+                                type="button"
+                                className="btn btn-secondary wf-btn-sm"
+                                onClick={() => uploadInputRefs.current[i]?.click()}
+                                disabled={uploadingStep === i}
+                                title="Upload an image from your computer"
+                              >
+                                {uploadingStep === i ? "Uploading…" : "↑ Upload"}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary wf-btn-sm"
+                                onClick={() => api.getAllImages().then(setAllImages).catch(() => {})}
+                                title="Refresh image list"
+                              >↻</button>
+                            </div>
                           </div>
+                          <input
+                            ref={(el) => { uploadInputRefs.current[i] = el; }}
+                            type="file"
+                            accept="image/*"
+                            multiple={!isTextModel}
+                            style={{ display: "none" }}
+                            onChange={(e) => { handleStepUpload(i, e.target.files, isTextModel); e.target.value = ""; }}
+                          />
                           {(() => {
-                            const refImages = allImages
-                              .filter((img) => img.filename && img.status === "done"
-                                && !img.filename.endsWith(".mp4")
-                                && !img.filename.endsWith(".svg"))
-                              .reverse();
+                            const refImages = allImages.filter(isPickableImage).reverse();
                             return refImages.length === 0 ? (
-                              <p className="wf-hint">No generated images yet. Run some generations first.</p>
+                              <p className="wf-hint">
+                                No images yet. Upload one above, or run a generation first.
+                              </p>
                             ) : (
                               <div className="wf-ref-grid">
                                 {refImages.map((img) => {
@@ -614,13 +827,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                                     <div
                                       key={img.image_id}
                                       className={`wf-ref-thumb${selected ? " selected" : ""}`}
-                                      onClick={() => {
-                                        const ids = step.initial_image_ids || [];
-                                        updateStep(i, "initial_image_ids", selected
-                                          ? ids.filter((id) => id !== img.image_id)
-                                          : [...ids, img.image_id]
-                                        );
-                                      }}
+                                      onClick={() => toggleRefImage(i, img.image_id, isTextModel)}
                                     >
                                       <img src={img.url} alt="" />
                                       {selected && <span className="wf-ref-check">✓</span>}
@@ -630,17 +837,87 @@ export default function WorkflowConfigTab({ onExpand }) {
                               </div>
                             );
                           })()}
+                          {isTextModel && (
+                            <p className="wf-hint">gpt-5-nano takes a single image — picking another replaces it.</p>
+                          )}
+                          {isUpload && stepImageCount === 0 && (
+                            <div className="wf-warning">
+                              No image selected — this step will fail the run. Upload one or pick from above.
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      <label className="prompt-label">Prompt template</label>
-                      <textarea
-                        className="prompt-textarea"
-                        value={step.prompt_template}
-                        onChange={(e) => updateStep(i, "prompt_template", e.target.value)}
-                        placeholder='e.g. "A {subject} in {scene} wearing {outfit}"'
-                        rows={3}
-                      />
+                      {isMerger && (
+                        <div className="wf-merge-picker">
+                          <label className="prompt-label">Merge videos from</label>
+                          {videoStepIdxs.length === 0 ? (
+                            <p className="wf-hint">
+                              No earlier step produces video. Add a video step (e.g. p-video) before this one.
+                            </p>
+                          ) : (
+                            <>
+                              <div className="wf-merge-options">
+                                {videoStepIdxs.map((si) => (
+                                  <label key={si} className="wf-merge-option">
+                                    <input
+                                      type="checkbox"
+                                      checked={mergeSources.includes(si)}
+                                      onChange={() => toggleMergeSource(i, si)}
+                                    />
+                                    <span>
+                                      Step {si + 1}
+                                      <span className="wf-merge-option-meta">
+                                        {" "}· {draft.steps[si].model} · {draft.steps[si].num_outputs} clip
+                                        {draft.steps[si].num_outputs !== 1 ? "s" : ""}
+                                      </span>
+                                    </span>
+                                  </label>
+                                ))}
+                              </div>
+                              <p className="wf-hint">
+                                Clips are joined in step order, then in the order they were generated.
+                                {mergeSources.length === 0 && " Nothing checked — every earlier video step is used."}
+                              </p>
+                            </>
+                          )}
+                          {videoStepIdxs.length > 0 && mergeClipCount < 2 && (
+                            <div className="wf-warning">
+                              Only {mergeClipCount} video would be available — merging needs at least 2.
+                              Raise the source step's Outputs or check another step.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!isMerger && !isUpload && (
+                        <>
+                          <label className="prompt-label">Prompt template</label>
+                          <textarea
+                            className="prompt-textarea"
+                            value={step.prompt_template}
+                            onChange={(e) => updateStep(i, "prompt_template", e.target.value)}
+                            placeholder='e.g. "A {subject} in {scene} wearing {outfit}"'
+                            rows={3}
+                          />
+                          {textStepIdxs.length > 0 && (
+                            <p className="wf-hint">
+                              Text placeholders: <code>{"{text}"}</code> uses Step{" "}
+                              {textStepIdxs[textStepIdxs.length - 1] + 1}'s output
+                              {textStepIdxs.length > 1 && (
+                                <> · target one directly with{" "}
+                                  {textStepIdxs.map((si) => `{step${si + 1}_text}`).join(", ")}</>
+                              )}
+                            </p>
+                          )}
+                          {badTextRefs.length > 0 && (
+                            <div className="wf-warning">
+                              {badTextRefs.join(", ")} in this prompt {badTextRefs.length === 1 ? "does" : "do"} not
+                              match a text step before this one.
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -663,6 +940,15 @@ export default function WorkflowConfigTab({ onExpand }) {
             </button>
             {!isNew && (
               <>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleDuplicate}
+                  disabled={duplicating}
+                  title="Create a disabled copy of this workflow"
+                >
+                  {duplicating ? "Duplicating…" : "Duplicate"}
+                </button>
                 <button
                   type="button"
                   className="btn btn-secondary"
@@ -733,7 +1019,15 @@ export default function WorkflowConfigTab({ onExpand }) {
                         {sr.error && <span className="wf-run-error">{sr.error}</span>}
                         <div className="wf-run-thumbs">
                           {sr.image_urls.map((url, k) => (
-                            <img key={k} src={url} alt="" className="wf-thumb" />
+                            isTextFile(url) ? (
+                              <a key={k} href={url} target="_blank" rel="noreferrer" className="wf-thumb wf-thumb-text">
+                                TXT
+                              </a>
+                            ) : isVideoFile(url) ? (
+                              <video key={k} src={url} className="wf-thumb" muted playsInline preload="metadata" controls />
+                            ) : (
+                              <img key={k} src={url} alt="" className="wf-thumb" />
+                            )
                           ))}
                         </div>
                       </div>

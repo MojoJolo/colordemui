@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { isPickableImage } from "../mediaTypes";
 
 const ASPECT_RATIOS = [
   { value: "9:16", label: "9:16", desc: "TikTok" },
@@ -84,9 +85,7 @@ export default function FluxKleinForm({ onGenerate, isGenerating, images = [] })
   const [uploadError, setUploadError] = useState(null);
   const fileInputRef = useRef(null);
 
-  const candidates = images.filter(
-    (img) => img.status === "done" && img.url && !img.filename?.endsWith(".mp4")
-  );
+  const candidates = images.filter(isPickableImage);
 
   // Set of gallery image_ids already added as ref images
   const addedGalleryIds = new Set(

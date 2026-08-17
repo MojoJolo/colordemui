@@ -95,6 +95,21 @@ class ImageModel(ABC):
         return False
 
     @property
+    def is_merger(self) -> bool:
+        """True if this model combines the outputs of earlier steps into one file."""
+        return False
+
+    @property
+    def is_text(self) -> bool:
+        """True if this model returns text rather than an image or video."""
+        return False
+
+    @property
+    def is_upload(self) -> bool:
+        """True if this step supplies its configured images instead of generating any."""
+        return False
+
+    @property
     def supports_duration(self) -> bool:
         """Whether this model accepts a duration parameter."""
         return False
@@ -137,6 +152,32 @@ class ImageModel(ABC):
     @staticmethod
     def _replicate_run(model_id: str, **kwargs):
         return _throttled_replicate_run(model_id, **kwargs)
+
+    def _extract_text(self, output) -> str:
+        """
+        Normalise a text response. Language models stream their answer as a
+        sequence of string chunks, so every chunk has to be joined —
+        _extract_bytes() would keep only the first one.
+        """
+        if output is None:
+            raise ValueError("Replicate returned no output")
+
+        if isinstance(output, str):
+            return output
+
+        # FileOutput — has .read()
+        if hasattr(output, "read"):
+            data = output.read()
+            return data.decode("utf-8") if isinstance(data, bytes) else str(data)
+
+        # Iterator / list of chunks — concatenate them all
+        if isinstance(output, (list, tuple)) or hasattr(output, "__iter__"):
+            chunks = [c if isinstance(c, str) else str(c) for c in output]
+            if not chunks:
+                raise ValueError("Replicate returned an empty response")
+            return "".join(chunks)
+
+        raise ValueError(f"Unexpected Replicate output type: {type(output)}")
 
     def _extract_bytes(self, output) -> bytes:
         """Normalise the various output shapes the Replicate SDK can return."""

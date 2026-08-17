@@ -11,19 +11,22 @@ from app.services.storage import GENERATED_DIR
 from app.utils import utcnow
 
 
-def _load_images_by_ids(image_ids: List[str]) -> List[bytes]:
-    """Load image bytes from disk for the given image IDs."""
+def _filenames_by_ids(image_ids: List[str]) -> List[str]:
+    """Resolve image IDs to filenames relative to GENERATED_DIR, skipping missing files."""
     from app.services import jobs as job_service
     all_images = job_service.get_all_images()
     id_to_filename = {img.image_id: img.filename for img in all_images if img.filename}
     result = []
     for image_id in image_ids:
         filename = id_to_filename.get(image_id)
-        if filename:
-            path = GENERATED_DIR / filename
-            if path.exists():
-                result.append(path.read_bytes())
+        if filename and (GENERATED_DIR / filename).exists():
+            result.append(filename)
     return result
+
+
+def _load_images_by_ids(image_ids: List[str]) -> List[bytes]:
+    """Load image bytes from disk for the given image IDs."""
+    return [(GENERATED_DIR / f).read_bytes() for f in _filenames_by_ids(image_ids)]
 
 
 def _derive_slug(name: str) -> str:
@@ -102,6 +105,35 @@ def update_workflow(workflow_id: str, request) -> Optional[WorkflowConfig]:
     return wf
 
 
+def duplicate_workflow(workflow_id: str) -> Optional[WorkflowConfig]:
+    """
+    Clone a workflow's configuration under a new id and slug. Run history is not
+    copied, and the copy starts disabled so it does not fire on the shared
+    schedule before it has been reviewed.
+    """
+    src = workflow_storage.load_workflow(workflow_id)
+    if not src:
+        return None
+
+    now = utcnow()
+    name = f"{src.name} (copy)"
+    copy = WorkflowConfig(
+        workflow_id=str(uuid.uuid4()),
+        name=name,
+        slug=_unique_slug(name),
+        # Fresh step_ids so the copy's runs never collide with the original's
+        steps=[s.model_copy(update={"step_id": str(uuid.uuid4())}, deep=True) for s in src.steps],
+        slot_lists={slot: list(words) for slot, words in src.slot_lists.items()},
+        schedule_value=src.schedule_value,
+        schedule_unit=src.schedule_unit,
+        enabled=False,
+        created_at=now,
+        updated_at=now,
+    )
+    workflow_storage.save_workflow(copy)
+    return copy
+
+
 def delete_workflow(workflow_id: str) -> bool:
     return workflow_storage.delete_workflow(workflow_id)
 
@@ -114,23 +146,171 @@ def get_workflow(workflow_id: str) -> Optional[WorkflowConfig]:
     return workflow_storage.load_workflow(workflow_id)
 
 
+def _is_merger_model(name: str) -> bool:
+    try:
+        return model_registry.get_model(name).is_merger
+    except ValueError:
+        return False
+
+
+def _is_upload_model(name: str) -> bool:
+    try:
+        return model_registry.get_model(name).is_upload
+    except ValueError:
+        return False
+
+
+def _step_num_outputs(s) -> int:
+    # A merger always produces exactly one combined file; an upload step produces
+    # exactly the images it holds. Keeping these accurate keeps run progress honest.
+    if _is_merger_model(s.model):
+        return 1
+    if _is_upload_model(s.model):
+        return max(1, len(getattr(s, "initial_image_ids", []) or []))
+    return s.num_outputs
+
+
 def _build_step(s) -> WorkflowStep:
     return WorkflowStep(
         step_id=s.step_id or str(uuid.uuid4()),
         model=s.model,
-        num_outputs=s.num_outputs,
+        num_outputs=_step_num_outputs(s),
         prompt_template=s.prompt_template,
         aspect_ratio=getattr(s, "aspect_ratio", "9:16"),
         duration=getattr(s, "duration", 5),
         save_audio=getattr(s, "save_audio", True),
         initial_image_ids=getattr(s, "initial_image_ids", []),
         source_step_index=getattr(s, "source_step_index", None),
+        merge_source_steps=getattr(s, "merge_source_steps", []),
+        language=getattr(s, "language", "english"),
+        caption_size=getattr(s, "caption_size", 40),
     )
 
 
 # ---------------------------------------------------------------------------
 # Execution
 # ---------------------------------------------------------------------------
+
+_TEXT_PLACEHOLDER_RE = re.compile(r"\{(?:step(\d+)_)?text\}")
+
+
+def _produces_text(step: WorkflowStep) -> bool:
+    try:
+        return model_registry.get_model(step.model).is_text
+    except ValueError:
+        return False
+
+
+def _resolve_text_placeholders(
+    prompt: str,
+    index: int,
+    wf: WorkflowConfig,
+    step_texts: dict,
+) -> str:
+    """
+    Substitute {text} (the nearest preceding text step's output) and
+    {stepN_text} (that step's output, 1-indexed to match the UI).
+    """
+    def replace(match) -> str:
+        if match.group(1):
+            n = int(match.group(1))
+            src = n - 1
+            if not 0 <= src < index:
+                raise ValueError(
+                    f"Step {index + 1} uses {match.group(0)}, but Step {n} does not come before it."
+                )
+            if src not in step_texts:
+                raise ValueError(
+                    f"Step {index + 1} uses {match.group(0)}, but Step {n} "
+                    f"('{wf.steps[src].model}') does not produce text."
+                )
+            return step_texts[src]
+
+        for s in range(index - 1, -1, -1):
+            if s in step_texts:
+                return step_texts[s]
+        raise ValueError(
+            f"Step {index + 1} uses {{text}} but no earlier step produces text. "
+            "Add a text step (e.g. gpt-5-nano) before it."
+        )
+
+    return _TEXT_PLACEHOLDER_RE.sub(replace, prompt)
+
+
+def _resolve_ref_bytes(
+    step: WorkflowStep,
+    index: int,
+    wf: WorkflowConfig,
+    step_outputs: dict,
+) -> List[bytes]:
+    """Pick the reference images for a step: its configured source, else the nearest preceding step."""
+    if step.source_step_index is not None:
+        src = step.source_step_index
+        if 0 <= src < index and _produces_text(wf.steps[src]):
+            raise ValueError(
+                f"Step {index + 1} is set to take images from Step {src + 1}, but "
+                f"'{wf.steps[src].model}' produces text. Use a {{step{src + 1}_text}} "
+                "placeholder in the prompt instead."
+            )
+        return step_outputs.get(src, [])
+
+    # step_outputs holds no text steps, so this naturally skips over them
+    for s in range(index - 1, -1, -1):
+        if step_outputs.get(s):
+            return step_outputs[s]
+    return []
+
+
+def _produces_video(step: WorkflowStep) -> bool:
+    try:
+        return model_registry.get_model(step.model).output_extension == ".mp4"
+    except ValueError:
+        return False
+
+
+def _collect_merge_clips(
+    step: WorkflowStep,
+    index: int,
+    wf: WorkflowConfig,
+    step_outputs: dict,
+) -> List[bytes]:
+    """Gather the videos a merger step should join, in playback order."""
+    sources = [s for s in step.merge_source_steps if 0 <= s < index]
+    if not sources:
+        sources = [s for s in range(index) if _produces_video(wf.steps[s])]
+    if not sources:
+        raise ValueError(
+            f"Step {index + 1} merges videos but no earlier step produces video output."
+        )
+
+    clips: List[bytes] = []
+    for s in sources:
+        if not _produces_video(wf.steps[s]):
+            raise ValueError(
+                f"Step {index + 1} is set to merge Step {s + 1}, "
+                f"but '{wf.steps[s].model}' does not produce video."
+            )
+        clips.extend(step_outputs.get(s, []))
+
+    if len(clips) < 2:
+        picked = ", ".join(f"Step {s + 1}" for s in sources)
+        raise ValueError(
+            f"Step {index + 1} needs at least 2 videos to merge but got {len(clips)} "
+            f"from {picked}. Increase that step's Outputs or select more source steps."
+        )
+    return clips
+
+
+def _generate_kwargs(model, step: WorkflowStep) -> dict:
+    kwargs = {}
+    if model.supports_duration:
+        kwargs.update(duration=step.duration, save_audio=step.save_audio)
+    if model.supports_aspect_ratio:
+        kwargs["aspect_ratio"] = step.aspect_ratio
+    if model.supports_captions:
+        kwargs.update(language=step.language, caption_size=step.caption_size)
+    return kwargs
+
 
 def run_workflow(workflow_id: str, run_id: str) -> None:
     wf = workflow_storage.load_workflow(workflow_id)
@@ -147,16 +327,16 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
     )
     workflow_storage.save_run(run)
 
-    # step_outputs[i] holds the produced bytes for step i once it completes
+    # step_outputs[i] holds the produced image/video bytes for step i once it
+    # completes; text steps write to step_texts instead so their output is never
+    # handed to a later step as a reference image.
     step_outputs: dict[int, List[bytes]] = {}
+    step_texts: dict[int, str] = {}
 
     # Pick one value per slot for the entire run so all steps share the same context
     picked_slots = {slot: [random.choice(words)] for slot, words in wf.slot_lists.items() if words}
 
     for i, step in enumerate(wf.steps):
-        prompt = resolve_prompt(step.prompt_template, picked_slots)
-        run.resolved_prompts.append(prompt)
-
         model = model_registry.get_model(step.model)
         output_dir = GENERATED_DIR / wf.slug
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -165,44 +345,65 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
         run.step_results.append(step_result)
         workflow_storage.save_run(run)
 
-        # Resolve which step's output to use as reference input
-        if step.source_step_index is not None:
-            src = step.source_step_index
-            ref_bytes = step_outputs.get(src, [])
-        else:
-            ref_bytes = step_outputs.get(i - 1, []) if i > 0 else []
-
         produced_bytes: List[bytes] = []
         try:
-            for j in range(step.num_outputs):
-                if model.is_multi_reference:
-                    ref_images = ref_bytes if ref_bytes else _load_images_by_ids(step.initial_image_ids)
-                    if not ref_images:
-                        raise ValueError(
-                            f"Step {i + 1} uses '{step.model}' which requires reference images, "
-                            "but none are available from the source step or configured initial images."
-                        )
-                    img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
-                elif ref_bytes and model.accepts_image:
-                    ref = ref_bytes[j % len(ref_bytes)]
-                    kwargs = {"duration": step.duration, "save_audio": step.save_audio} if model.supports_duration else {}
-                    img_bytes = model.generate(prompt, ref, **kwargs)
-                else:
-                    kwargs = {"duration": step.duration, "save_audio": step.save_audio} if model.supports_duration else {}
-                    img_bytes = model.generate(prompt, None, **kwargs)
-                produced_bytes.append(img_bytes)
+            prompt = resolve_prompt(step.prompt_template, picked_slots)
+            prompt = _resolve_text_placeholders(prompt, i, wf, step_texts)
+            run.resolved_prompts.append(prompt)
 
-            filenames = []
-            for k, img_bytes in enumerate(produced_bytes):
-                fname = f"{run_id}_step{i}_{k}{model.output_extension}"
-                (output_dir / fname).write_bytes(img_bytes)
-                filenames.append(f"{wf.slug}/{fname}")
+            # Resolve which step's output to use as reference input
+            ref_bytes = _resolve_ref_bytes(step, i, wf, step_outputs)
+            if not ref_bytes and step.initial_image_ids:
+                ref_bytes = _load_images_by_ids(step.initial_image_ids)
+            if model.is_upload:
+                produced_bytes = _load_images_by_ids(step.initial_image_ids)
+                if not produced_bytes:
+                    raise ValueError(
+                        f"Step {i + 1} supplies uploaded images but none are selected. "
+                        "Upload or pick an image on that step."
+                    )
+            elif model.is_merger:
+                clips = _collect_merge_clips(step, i, wf, step_outputs)
+                produced_bytes.append(model.merge(clips))
+            else:
+                for j in range(step.num_outputs):
+                    if model.is_multi_reference:
+                        ref_images = ref_bytes
+                        if not ref_images:
+                            raise ValueError(
+                                f"Step {i + 1} uses '{step.model}' which requires reference images, "
+                                "but none are available from the source step or configured initial images."
+                            )
+                        img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
+                    elif ref_bytes and model.accepts_image:
+                        ref = ref_bytes[j % len(ref_bytes)]
+                        img_bytes = model.generate(prompt, ref, **_generate_kwargs(model, step))
+                    else:
+                        img_bytes = model.generate(prompt, None, **_generate_kwargs(model, step))
+                    produced_bytes.append(img_bytes)
+
+            if model.is_upload:
+                # Point at the uploaded files instead of copying them into every run
+                filenames = _filenames_by_ids(step.initial_image_ids)
+            else:
+                filenames = []
+                for k, img_bytes in enumerate(produced_bytes):
+                    fname = f"{run_id}_step{i}_{k}{model.output_extension}"
+                    (output_dir / fname).write_bytes(img_bytes)
+                    filenames.append(f"{wf.slug}/{fname}")
 
             step_result.image_filenames = filenames
             step_result.status = "done"
-            step_outputs[i] = produced_bytes
+            if model.is_text:
+                step_texts[i] = produced_bytes[0].decode("utf-8", errors="replace")
+            else:
+                step_outputs[i] = produced_bytes
 
         except Exception as exc:
+            # Keep resolved_prompts aligned with step_results when the failure
+            # happened before the prompt was resolved
+            if len(run.resolved_prompts) <= i:
+                run.resolved_prompts.append(step.prompt_template)
             step_result.status = "failed"
             step_result.error = str(exc)
             run.status = "failed"
@@ -232,6 +433,11 @@ def get_workflow_images(workflow_id: str) -> List[dict]:
     images = []
     for run in sorted(runs, key=lambda r: r.started_at, reverse=True):
         for si, sr in enumerate(run.step_results):
+            # Upload steps are inputs, not generated output — listing them would
+            # repeat the same image once per run, and deleting one from the
+            # gallery would remove the source the workflow depends on.
+            if si < len(wf.steps) and _is_upload_model(wf.steps[si].model):
+                continue
             prompt = run.resolved_prompts[si] if si < len(run.resolved_prompts) else ""
             for k, fname in enumerate(sr.image_filenames):
                 images.append({
