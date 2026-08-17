@@ -12,6 +12,7 @@ from app.services.models.grok_video import GrokVideoModel
 from app.services.models.nano_banana_2 import NanoBanana2Model
 from app.services.models.tiktok_captions import TikTokCaptionsModel
 from app.services.models.merge_videos import MergeVideosModel
+from app.services.models.gpt_5_nano import Gpt5NanoModel
 
 # ---------------------------------------------------------------------------
 # Registry — add new models here, nothing else needs to change.
@@ -28,6 +29,7 @@ _REGISTRY: Dict[str, ImageModel] = {
     "nano-banana-2": NanoBanana2Model(),
     "tiktok-captions": TikTokCaptionsModel(),
     "merge-videos": MergeVideosModel(),
+    "gpt-5-nano": Gpt5NanoModel(),
 }
 
 
@@ -47,6 +49,7 @@ def list_models() -> List[dict]:
             "requires_image": model.requires_image,
             "is_multi_reference": model.is_multi_reference,
             "is_merger": model.is_merger,
+            "is_text": model.is_text,
             "supports_aspect_ratio": model.supports_aspect_ratio,
             "supports_duration": model.supports_duration,
             "supports_captions": model.supports_captions,

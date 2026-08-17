@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { isTextFile, isVectorFile } from "../mediaTypes";
 
 const MAX_PIXELS = 1_000_000;
 
@@ -144,11 +145,13 @@ export default function GrokVideoForm({ onGenerate, isGenerating, images }) {
     { value: "3:4",   label: "3:4",   desc: "Portrait" },
   ];
 
+  // Videos are allowed here as reference material, so this is looser than isPickableImage
   const candidates = images.filter(
     (img) =>
       img.status === "done" &&
       img.url &&
-      !img.filename?.endsWith(".svg")
+      !isVectorFile(img.filename) &&
+      !isTextFile(img.filename)
   );
 
   function handleSubmit(e) {

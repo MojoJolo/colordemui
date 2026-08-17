@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import ImageGrid from "./ImageGrid";
+import { scaleViaCanvas } from "./FrameSlot";
+import { isPickableImage, isTextFile, isVideoFile } from "../mediaTypes";
 
 const DEFAULT_STEP = () => ({
   step_id: null,
@@ -69,7 +71,9 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState(null);
   const [expandedRunId, setExpandedRunId] = useState(null);
+  const [uploadingStep, setUploadingStep] = useState(null);
   const pollRef = useRef(null);
+  const uploadInputRefs = useRef({});
 
   // Load models + workflows + all images on mount
   useEffect(() => {
@@ -233,7 +237,68 @@ export default function WorkflowConfigTab({ onExpand }) {
         referenced.add(m[1]);
       }
     }
-    return [...referenced].filter((s) => !(s in draft.slot_lists));
+    // {text} / {stepN_text} are upstream text outputs, not randomization slots
+    return [...referenced].filter(
+      (s) => !(s in draft.slot_lists) && !/^(?:step\d+_)?text$/.test(s)
+    );
+  }
+
+  // True when the step at `index` produces text a later prompt can splice in
+  function isTextStep(index) {
+    const step = draft && draft.steps[index];
+    const info = step && models.find((m) => m.id === step.model);
+    return !!info && !!info.is_text;
+  }
+
+  // {text} / {stepN_text} placeholders that no preceding text step can satisfy
+  function findBadTextRefs(template, index, textStepIdxs) {
+    const bad = [];
+    const regex = /\{(?:step(\d+)_)?text\}/g;
+    let m;
+    while ((m = regex.exec(template || "")) !== null) {
+      if (m[1] === undefined) {
+        if (textStepIdxs.length === 0) bad.push("{text}");
+      } else if (!textStepIdxs.includes(parseInt(m[1], 10) - 1)) {
+        bad.push(m[0]);
+      }
+    }
+    return [...new Set(bad)];
+  }
+
+  function toggleRefImage(stepIndex, imageId, single) {
+    const ids = draft.steps[stepIndex].initial_image_ids || [];
+    if (ids.includes(imageId)) {
+      updateStep(stepIndex, "initial_image_ids", ids.filter((id) => id !== imageId));
+    } else {
+      updateStep(stepIndex, "initial_image_ids", single ? [imageId] : [...ids, imageId]);
+    }
+  }
+
+  // Uploads become ordinary gallery entries, so the step just references the new id
+  async function handleStepUpload(stepIndex, files, single) {
+    if (!files || files.length === 0) return;
+    setUploadingStep(stepIndex);
+    setError(null);
+    try {
+      const selected = Array.from(files).slice(0, single ? 1 : files.length);
+      const uploaded = [];
+      for (const file of selected) {
+        const dataUrl = await scaleViaCanvas(file);
+        const img = await api.uploadImage(dataUrl, file.name);
+        uploaded.push(img.image_id);
+      }
+      setAllImages(await api.getAllImages());
+      const existing = draft.steps[stepIndex].initial_image_ids || [];
+      updateStep(
+        stepIndex,
+        "initial_image_ids",
+        single ? uploaded.slice(-1) : [...existing, ...uploaded]
+      );
+    } catch (e) {
+      setError(e.message || "Upload failed.");
+    } finally {
+      setUploadingStep(null);
+    }
   }
 
   // True when the step at `index` produces video output that a merger can consume
@@ -526,11 +591,12 @@ export default function WorkflowConfigTab({ onExpand }) {
                   ? step.source_step_index
                   : (i > 0 ? i - 1 : null);
                 const isMerger = !!(modelInfo && modelInfo.is_merger);
+                const isTextModel = !!(modelInfo && modelInfo.is_text);
                 const chainWarning = isChained && modelInfo && !isMerger
                   && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
                 const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio;
                 const showDuration = modelInfo && modelInfo.supports_duration;
-                const showRefPicker = modelInfo && modelInfo.is_multi_reference;
+                const showRefPicker = modelInfo && (modelInfo.is_multi_reference || modelInfo.is_text);
                 const showCaptions = modelInfo && modelInfo.supports_captions;
                 // Earlier steps this merger can pull clips from, and how many clips that yields
                 const videoStepIdxs = isMerger
@@ -541,6 +607,9 @@ export default function WorkflowConfigTab({ onExpand }) {
                 const mergeClipCount = effectiveSources.reduce(
                   (acc, si) => acc + (draft.steps[si]?.num_outputs || 0), 0
                 );
+                // Text placeholders can only refer to a text step that runs earlier
+                const textStepIdxs = draft.steps.slice(0, i).map((_, si) => si).filter(isTextStep);
+                const badTextRefs = findBadTextRefs(step.prompt_template, i, textStepIdxs);
                 return (
                   <div key={i} className="wf-step-card">
                     <div className="wf-step-header">
@@ -694,26 +763,43 @@ export default function WorkflowConfigTab({ onExpand }) {
                         <div className="wf-ref-picker">
                           <div className="wf-ref-picker-header">
                             <label className="prompt-label">
-                              Reference Images
+                              {isTextModel ? "Reference Image" : "Reference Images"}
                               {isChained && (
                                 <span className="wf-ref-hint"> — Step {sourceIdx + 1}'s output will be used; select below as fallback for Step 1</span>
                               )}
                             </label>
-                            <button
-                              type="button"
-                              className="btn btn-secondary wf-btn-sm"
-                              onClick={() => api.getAllImages().then(setAllImages).catch(() => {})}
-                              title="Refresh image list"
-                            >↻</button>
+                            <div className="wf-ref-picker-actions">
+                              <button
+                                type="button"
+                                className="btn btn-secondary wf-btn-sm"
+                                onClick={() => uploadInputRefs.current[i]?.click()}
+                                disabled={uploadingStep === i}
+                                title="Upload an image from your computer"
+                              >
+                                {uploadingStep === i ? "Uploading…" : "↑ Upload"}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary wf-btn-sm"
+                                onClick={() => api.getAllImages().then(setAllImages).catch(() => {})}
+                                title="Refresh image list"
+                              >↻</button>
+                            </div>
                           </div>
+                          <input
+                            ref={(el) => { uploadInputRefs.current[i] = el; }}
+                            type="file"
+                            accept="image/*"
+                            multiple={!isTextModel}
+                            style={{ display: "none" }}
+                            onChange={(e) => { handleStepUpload(i, e.target.files, isTextModel); e.target.value = ""; }}
+                          />
                           {(() => {
-                            const refImages = allImages
-                              .filter((img) => img.filename && img.status === "done"
-                                && !img.filename.endsWith(".mp4")
-                                && !img.filename.endsWith(".svg"))
-                              .reverse();
+                            const refImages = allImages.filter(isPickableImage).reverse();
                             return refImages.length === 0 ? (
-                              <p className="wf-hint">No generated images yet. Run some generations first.</p>
+                              <p className="wf-hint">
+                                No images yet. Upload one above, or run a generation first.
+                              </p>
                             ) : (
                               <div className="wf-ref-grid">
                                 {refImages.map((img) => {
@@ -722,13 +808,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                                     <div
                                       key={img.image_id}
                                       className={`wf-ref-thumb${selected ? " selected" : ""}`}
-                                      onClick={() => {
-                                        const ids = step.initial_image_ids || [];
-                                        updateStep(i, "initial_image_ids", selected
-                                          ? ids.filter((id) => id !== img.image_id)
-                                          : [...ids, img.image_id]
-                                        );
-                                      }}
+                                      onClick={() => toggleRefImage(i, img.image_id, isTextModel)}
                                     >
                                       <img src={img.url} alt="" />
                                       {selected && <span className="wf-ref-check">✓</span>}
@@ -738,6 +818,9 @@ export default function WorkflowConfigTab({ onExpand }) {
                               </div>
                             );
                           })()}
+                          {isTextModel && (
+                            <p className="wf-hint">gpt-5-nano takes a single image — picking another replaces it.</p>
+                          )}
                         </div>
                       )}
 
@@ -793,6 +876,22 @@ export default function WorkflowConfigTab({ onExpand }) {
                             placeholder='e.g. "A {subject} in {scene} wearing {outfit}"'
                             rows={3}
                           />
+                          {textStepIdxs.length > 0 && (
+                            <p className="wf-hint">
+                              Text placeholders: <code>{"{text}"}</code> uses Step{" "}
+                              {textStepIdxs[textStepIdxs.length - 1] + 1}'s output
+                              {textStepIdxs.length > 1 && (
+                                <> · target one directly with{" "}
+                                  {textStepIdxs.map((si) => `{step${si + 1}_text}`).join(", ")}</>
+                              )}
+                            </p>
+                          )}
+                          {badTextRefs.length > 0 && (
+                            <div className="wf-warning">
+                              {badTextRefs.join(", ")} in this prompt {badTextRefs.length === 1 ? "does" : "do"} not
+                              match a text step before this one.
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
@@ -896,7 +995,11 @@ export default function WorkflowConfigTab({ onExpand }) {
                         {sr.error && <span className="wf-run-error">{sr.error}</span>}
                         <div className="wf-run-thumbs">
                           {sr.image_urls.map((url, k) => (
-                            url.endsWith(".mp4") ? (
+                            isTextFile(url) ? (
+                              <a key={k} href={url} target="_blank" rel="noreferrer" className="wf-thumb wf-thumb-text">
+                                TXT
+                              </a>
+                            ) : isVideoFile(url) ? (
                               <video key={k} src={url} className="wf-thumb" muted playsInline preload="metadata" controls />
                             ) : (
                               <img key={k} src={url} alt="" className="wf-thumb" />

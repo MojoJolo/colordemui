@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { isPickableImage } from "../mediaTypes";
 
 const ASPECT_RATIOS = [
   { value: "match_input_image", label: "Match", desc: "Input" },
@@ -109,9 +110,7 @@ export default function PImageEditForm({ onGenerate, isGenerating, images = [] }
   const [uploadError, setUploadError] = useState(null);
   const fileInputRef = useRef(null);
 
-  const candidates = images.filter(
-    (img) => img.status === "done" && img.url && !img.filename?.endsWith(".mp4")
-  );
+  const candidates = images.filter(isPickableImage);
 
   const addedGalleryIds = new Set(
     refImages.filter((r) => r.galleryId).map((r) => r.galleryId)

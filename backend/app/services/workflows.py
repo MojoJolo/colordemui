@@ -172,6 +172,76 @@ def _build_step(s) -> WorkflowStep:
 # Execution
 # ---------------------------------------------------------------------------
 
+_TEXT_PLACEHOLDER_RE = re.compile(r"\{(?:step(\d+)_)?text\}")
+
+
+def _produces_text(step: WorkflowStep) -> bool:
+    try:
+        return model_registry.get_model(step.model).is_text
+    except ValueError:
+        return False
+
+
+def _resolve_text_placeholders(
+    prompt: str,
+    index: int,
+    wf: WorkflowConfig,
+    step_texts: dict,
+) -> str:
+    """
+    Substitute {text} (the nearest preceding text step's output) and
+    {stepN_text} (that step's output, 1-indexed to match the UI).
+    """
+    def replace(match) -> str:
+        if match.group(1):
+            n = int(match.group(1))
+            src = n - 1
+            if not 0 <= src < index:
+                raise ValueError(
+                    f"Step {index + 1} uses {match.group(0)}, but Step {n} does not come before it."
+                )
+            if src not in step_texts:
+                raise ValueError(
+                    f"Step {index + 1} uses {match.group(0)}, but Step {n} "
+                    f"('{wf.steps[src].model}') does not produce text."
+                )
+            return step_texts[src]
+
+        for s in range(index - 1, -1, -1):
+            if s in step_texts:
+                return step_texts[s]
+        raise ValueError(
+            f"Step {index + 1} uses {{text}} but no earlier step produces text. "
+            "Add a text step (e.g. gpt-5-nano) before it."
+        )
+
+    return _TEXT_PLACEHOLDER_RE.sub(replace, prompt)
+
+
+def _resolve_ref_bytes(
+    step: WorkflowStep,
+    index: int,
+    wf: WorkflowConfig,
+    step_outputs: dict,
+) -> List[bytes]:
+    """Pick the reference images for a step: its configured source, else the nearest preceding step."""
+    if step.source_step_index is not None:
+        src = step.source_step_index
+        if 0 <= src < index and _produces_text(wf.steps[src]):
+            raise ValueError(
+                f"Step {index + 1} is set to take images from Step {src + 1}, but "
+                f"'{wf.steps[src].model}' produces text. Use a {{step{src + 1}_text}} "
+                "placeholder in the prompt instead."
+            )
+        return step_outputs.get(src, [])
+
+    # step_outputs holds no text steps, so this naturally skips over them
+    for s in range(index - 1, -1, -1):
+        if step_outputs.get(s):
+            return step_outputs[s]
+    return []
+
+
 def _produces_video(step: WorkflowStep) -> bool:
     try:
         return model_registry.get_model(step.model).output_extension == ".mp4"
@@ -238,16 +308,16 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
     )
     workflow_storage.save_run(run)
 
-    # step_outputs[i] holds the produced bytes for step i once it completes
+    # step_outputs[i] holds the produced image/video bytes for step i once it
+    # completes; text steps write to step_texts instead so their output is never
+    # handed to a later step as a reference image.
     step_outputs: dict[int, List[bytes]] = {}
+    step_texts: dict[int, str] = {}
 
     # Pick one value per slot for the entire run so all steps share the same context
     picked_slots = {slot: [random.choice(words)] for slot, words in wf.slot_lists.items() if words}
 
     for i, step in enumerate(wf.steps):
-        prompt = resolve_prompt(step.prompt_template, picked_slots)
-        run.resolved_prompts.append(prompt)
-
         model = model_registry.get_model(step.model)
         output_dir = GENERATED_DIR / wf.slug
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -256,22 +326,23 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
         run.step_results.append(step_result)
         workflow_storage.save_run(run)
 
-        # Resolve which step's output to use as reference input
-        if step.source_step_index is not None:
-            src = step.source_step_index
-            ref_bytes = step_outputs.get(src, [])
-        else:
-            ref_bytes = step_outputs.get(i - 1, []) if i > 0 else []
-
         produced_bytes: List[bytes] = []
         try:
+            prompt = resolve_prompt(step.prompt_template, picked_slots)
+            prompt = _resolve_text_placeholders(prompt, i, wf, step_texts)
+            run.resolved_prompts.append(prompt)
+
+            # Resolve which step's output to use as reference input
+            ref_bytes = _resolve_ref_bytes(step, i, wf, step_outputs)
+            if not ref_bytes and step.initial_image_ids:
+                ref_bytes = _load_images_by_ids(step.initial_image_ids)
             if model.is_merger:
                 clips = _collect_merge_clips(step, i, wf, step_outputs)
                 produced_bytes.append(model.merge(clips))
             else:
                 for j in range(step.num_outputs):
                     if model.is_multi_reference:
-                        ref_images = ref_bytes if ref_bytes else _load_images_by_ids(step.initial_image_ids)
+                        ref_images = ref_bytes
                         if not ref_images:
                             raise ValueError(
                                 f"Step {i + 1} uses '{step.model}' which requires reference images, "
@@ -293,9 +364,16 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
 
             step_result.image_filenames = filenames
             step_result.status = "done"
-            step_outputs[i] = produced_bytes
+            if model.is_text:
+                step_texts[i] = produced_bytes[0].decode("utf-8", errors="replace")
+            else:
+                step_outputs[i] = produced_bytes
 
         except Exception as exc:
+            # Keep resolved_prompts aligned with step_results when the failure
+            # happened before the prompt was resolved
+            if len(run.resolved_prompts) <= i:
+                run.resolved_prompts.append(step.prompt_template)
             step_result.status = "failed"
             step_result.error = str(exc)
             run.status = "failed"
