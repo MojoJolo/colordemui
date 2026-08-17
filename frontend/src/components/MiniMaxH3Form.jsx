@@ -10,8 +10,11 @@ const ASPECT_RATIOS = [
   { value: "3:4",  label: "3:4",  desc: "Portrait" },
 ];
 
-const DURATIONS = [5, 10];
 const RESOLUTIONS = ["768P", "1080P", "2K"];
+
+// h3 is known to accept 5s and 10s; the backend clamps to this range too.
+const MIN_DURATION = 1;
+const MAX_DURATION = 10;
 
 /** One URL per line — blank lines are dropped (the backend trims them too). */
 function parseUrls(text) {
@@ -29,7 +32,7 @@ export default function MiniMaxH3Form({ onGenerate, isGenerating, images }) {
 
   const [duration, setDuration] = useState(5);
   const [aspectRatio, setAspectRatio] = useState("16:9");
-  const [resolution, setResolution] = useState("2K");
+  const [resolution, setResolution] = useState("768P");
 
   const [refImageText, setRefImageText] = useState("");
   const [refVideoText, setRefVideoText] = useState("");
@@ -89,20 +92,21 @@ export default function MiniMaxH3Form({ onGenerate, isGenerating, images }) {
         ))}
       </div>
 
-      <label className="prompt-label">Duration</label>
-      <div className="pvideo-aspect-grid">
-        {DURATIONS.map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={`pvideo-aspect-btn${duration === value ? " selected" : ""}`}
-            onClick={() => setDuration(value)}
-            disabled={isGenerating}
-          >
-            <span className="pvideo-aspect-ratio">{value}s</span>
-          </button>
-        ))}
+      <div className="pvideo-duration-row">
+        <span className="prompt-label">Duration</span>
+        <span className="pvideo-duration-value">{duration}s</span>
       </div>
+      <input
+        id="minimax-h3-duration"
+        type="range"
+        className="pvideo-duration-slider"
+        value={duration}
+        min={MIN_DURATION}
+        max={MAX_DURATION}
+        step={1}
+        onChange={(e) => setDuration(Number(e.target.value))}
+        disabled={isGenerating}
+      />
 
       <label className="prompt-label">Resolution</label>
       <div className="pvideo-aspect-grid">

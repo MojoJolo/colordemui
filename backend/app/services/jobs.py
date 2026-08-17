@@ -71,7 +71,7 @@ def create_job(
     aspect_ratio: str = "9:16",
     selected_last_frame_image_id: Optional[str] = None,
     save_audio: bool = True,
-    resolution: str = "2K",
+    resolution: str = "768P",
     reference_image_urls: Optional[List[str]] = None,
     reference_video_urls: Optional[List[str]] = None,
     reference_audio_urls: Optional[List[str]] = None,

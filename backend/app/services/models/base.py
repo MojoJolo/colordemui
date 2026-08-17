@@ -3,6 +3,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Optional
 
+import httpx
 import replicate
 import requests
 
@@ -10,15 +11,134 @@ _rate_limit_lock = threading.Lock()
 _last_call_time: float = 0.0
 _CALL_DELAY_SECONDS: float = 5.0
 
+# Video models can take minutes. The read timeout below only has to cover a
+# single poll request, not the whole generation, because we do the waiting
+# ourselves in _run_prediction().
+_REPLICATE_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=300.0, pool=10.0)
 
-def _throttled_replicate_run(model_id: str, **kwargs):
+# How long to keep polling one prediction before giving up, and how long to
+# wait between polls.
+_PREDICTION_DEADLINE_SECONDS: float = 1800.0
+_POLL_INTERVAL_SECONDS: float = 3.0
+
+# A dropped connection while polling is transient — the prediction keeps running
+# on Replicate's side, so we reconnect rather than resubmit.
+_TRANSIENT_ERRORS = (
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.RemoteProtocolError,
+)
+_MAX_CONSECUTIVE_POLL_FAILURES = 10
+
+_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "canceled"})
+
+_client_lock = threading.Lock()
+_client: Optional[replicate.Client] = None
+
+
+def _get_client() -> replicate.Client:
+    """
+    Build the shared client lazily so REPLICATE_API_TOKEN is read at first use,
+    not at import time — every model checks for the token itself and raises a
+    friendlier error before it gets here.
+    """
+    global _client
+    with _client_lock:
+        if _client is None:
+            _client = replicate.Client(timeout=_REPLICATE_TIMEOUT)
+        return _client
+
+
+def _throttle() -> None:
+    """Space out prediction submissions. Polling is exempt."""
     global _last_call_time
     with _rate_limit_lock:
         elapsed = time.time() - _last_call_time
         if elapsed < _CALL_DELAY_SECONDS:
             time.sleep(_CALL_DELAY_SECONDS - elapsed)
         _last_call_time = time.time()
-    return replicate.run(model_id, **kwargs)
+
+
+def _run_prediction(model_id: str, **kwargs):
+    """
+    Submit one prediction and poll it to completion.
+
+    replicate.run() does the same thing, but a read timeout anywhere inside it
+    surfaces as a failed generation with no way back — and retrying it would
+    submit (and bill for) a second prediction. Here the prediction is created
+    exactly once; only the polling GETs are retried.
+    """
+    client = _get_client()
+
+    _throttle()
+    prediction = client.predictions.create(model=model_id, **kwargs)
+
+    started = time.monotonic()
+    last_status = None
+    consecutive_failures = 0
+
+    while prediction.status not in _TERMINAL_STATUSES:
+        elapsed = time.monotonic() - started
+        if elapsed > _PREDICTION_DEADLINE_SECONDS:
+            raise TimeoutError(
+                f"{model_id} did not finish within "
+                f"{_PREDICTION_DEADLINE_SECONDS / 60:.0f} minutes "
+                f"(prediction {prediction.id}, last status {prediction.status})"
+            )
+
+        if prediction.status != last_status:
+            print(f"[replicate] {model_id} {prediction.status} {elapsed:.0f}s")
+            last_status = prediction.status
+
+        time.sleep(_POLL_INTERVAL_SECONDS)
+        try:
+            prediction.reload()
+            consecutive_failures = 0
+        except _TRANSIENT_ERRORS as exc:
+            consecutive_failures += 1
+            if consecutive_failures >= _MAX_CONSECUTIVE_POLL_FAILURES:
+                raise
+            backoff = min(_POLL_INTERVAL_SECONDS * 2**consecutive_failures, 30.0)
+            print(
+                f"[replicate] {model_id} poll failed "
+                f"({consecutive_failures}/{_MAX_CONSECUTIVE_POLL_FAILURES}): {exc} — "
+                f"retrying in {backoff:.0f}s"
+            )
+            time.sleep(backoff)
+
+    total = time.monotonic() - started
+    print(f"[replicate] {model_id} {prediction.status} {total:.0f}s")
+
+    if prediction.status != "succeeded":
+        raise ValueError(
+            f"{model_id} prediction {prediction.status}: "
+            f"{prediction.error or 'no error detail'}"
+        )
+    return prediction.output
+
+
+# Generous read timeout: a 10s 2K video is a large file, and the connection can
+# stall partway through.
+_DOWNLOAD_TIMEOUT = (10, 300)
+_DOWNLOAD_ATTEMPTS = 3
+
+
+def download_output(url: str) -> bytes:
+    """Fetch a generated file, retrying transient network failures."""
+    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+        try:
+            resp = requests.get(url, timeout=_DOWNLOAD_TIMEOUT)
+            resp.raise_for_status()
+            return resp.content
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            if attempt == _DOWNLOAD_ATTEMPTS:
+                raise
+            backoff = 2**attempt
+            print(
+                f"[replicate] download failed "
+                f"({attempt}/{_DOWNLOAD_ATTEMPTS}): {exc} — retrying in {backoff}s"
+            )
+            time.sleep(backoff)
 
 # ---------------------------------------------------------------------------
 # Shared style descriptors — used by all models.
@@ -164,7 +284,7 @@ class ImageModel(ABC):
 
     @staticmethod
     def _replicate_run(model_id: str, **kwargs):
-        return _throttled_replicate_run(model_id, **kwargs)
+        return _run_prediction(model_id, **kwargs)
 
     def _extract_text(self, output) -> str:
         """
@@ -204,9 +324,7 @@ class ImageModel(ABC):
 
         # URL string — download it
         if isinstance(output, str) and output.startswith("http"):
-            resp = requests.get(output, timeout=60)
-            resp.raise_for_status()
-            return resp.content
+            return download_output(output)
 
         # Raw text (e.g. inline SVG)
         if isinstance(output, str):

@@ -11,7 +11,7 @@ const DEFAULT_STEP = () => ({
   prompt_template: "",
   aspect_ratio: "9:16",
   duration: 5,
-  resolution: "2K",
+  resolution: "768P",
   save_audio: true,
   initial_image_ids: [],
   source_step_index: null,
@@ -26,7 +26,7 @@ function normalizeStep(s) {
     ...s,
     aspect_ratio: s.aspect_ratio || "9:16",
     duration: s.duration ?? 5,
-    resolution: s.resolution || "2K",
+    resolution: s.resolution || "768P",
     save_audio: s.save_audio ?? true,
     initial_image_ids: s.initial_image_ids || [],
     source_step_index: s.source_step_index ?? null,
@@ -334,10 +334,15 @@ export default function WorkflowConfigTab({ onExpand }) {
 
   // ---- Save ----
 
-  async function handleSave() {
+  /**
+   * Persist the current draft. Returns the saved workflow on success, null on
+   * failure — "Run Now" chains off the return value so it never triggers a run
+   * against a stale config.
+   */
+  async function saveDraft() {
     if (!draft || !draft.name.trim()) {
       setError("Workflow name is required.");
-      return;
+      return null;
     }
     setSaving(true);
     setError(null);
@@ -351,7 +356,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           prompt_template: s.prompt_template,
           aspect_ratio: s.aspect_ratio || "9:16",
           duration: s.duration ?? 5,
-          resolution: s.resolution || "2K",
+          resolution: s.resolution || "768P",
           save_audio: s.save_audio ?? true,
           initial_image_ids: s.initial_image_ids || [],
           source_step_index: s.source_step_index ?? null,
@@ -382,31 +387,41 @@ export default function WorkflowConfigTab({ onExpand }) {
         enabled: saved.enabled,
       });
       setIsNew(false);
+      return saved;
     } catch (e) {
       setError(e.message || "Save failed.");
+      return null;
     } finally {
       setSaving(false);
     }
   }
 
+  async function handleSave() {
+    await saveDraft();
+  }
+
   // ---- Trigger ----
 
   async function handleRunNow() {
-    if (!selectedId) return;
+    // Save first so the run uses what is on screen, not the last-saved config.
+    const saved = await saveDraft();
+    if (!saved) return; // save failed — saveDraft already surfaced the error
+    // saveDraft's setSelectedId hasn't landed yet, so go by the response.
+    const workflowId = saved.workflow_id;
     setTriggering(true);
     setError(null);
     try {
-      const { run_id } = await api.triggerWorkflow(selectedId);
+      const { run_id } = await api.triggerWorkflow(workflowId);
       setActiveRunId(run_id);
       // optimistically add a placeholder run
       setRuns((prev) => [
         {
           run_id,
-          workflow_id: selectedId,
+          workflow_id: workflowId,
           started_at: new Date().toISOString(),
           finished_at: null,
           status: "running",
-          total: draft.steps.reduce((acc, s) => acc + s.num_outputs, 0),
+          total: saved.steps.reduce((acc, s) => acc + s.num_outputs, 0),
           completed: 0,
           step_results: [],
           resolved_prompts: [],
@@ -725,7 +740,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                             <label className="prompt-label">Resolution</label>
                             <select
                               className="klein-input"
-                              value={step.resolution || "2K"}
+                              value={step.resolution || "768P"}
                               onChange={(e) => updateStep(i, "resolution", e.target.value)}
                             >
                               {["768P", "1080P", "2K"].map((r) => (
@@ -832,7 +847,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                             onChange={(e) => { handleStepUpload(i, e.target.files, isTextModel); e.target.value = ""; }}
                           />
                           {(() => {
-                            const refImages = allImages.filter(isPickableImage).reverse();
+                            const refImages = allImages.filter(isPickableImage);
                             return refImages.length === 0 ? (
                               <p className="wf-hint">
                                 No images yet. Upload one above, or run a generation first.
@@ -956,6 +971,21 @@ export default function WorkflowConfigTab({ onExpand }) {
             >
               {saving ? "Saving…" : "Save"}
             </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleRunNow}
+              disabled={saving || triggering || !!activeRunId}
+              title="Save the current changes, then start a run"
+            >
+              {saving
+                ? "Saving…"
+                : triggering
+                ? "Starting…"
+                : activeRunId
+                ? "Running…"
+                : "Save & Run Now"}
+            </button>
             {!isNew && (
               <>
                 <button
@@ -966,14 +996,6 @@ export default function WorkflowConfigTab({ onExpand }) {
                   title="Create a disabled copy of this workflow"
                 >
                   {duplicating ? "Duplicating…" : "Duplicate"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={handleRunNow}
-                  disabled={triggering || !!activeRunId}
-                >
-                  {triggering ? "Starting…" : activeRunId ? "Running…" : "Run Now"}
                 </button>
                 <button
                   type="button"

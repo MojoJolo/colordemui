@@ -5,9 +5,22 @@ from typing import List, Optional
 from app.services.models.base import ImageModel
 
 
+MIN_DURATION = 1
+MAX_DURATION = 10
+
+
 def _clean_urls(urls: Optional[List[str]]) -> List[str]:
     """Drop blank entries and surrounding whitespace from a reference URL list."""
     return [u.strip() for u in (urls or []) if u and u.strip()]
+
+
+def _clamp_duration(duration: int) -> int:
+    """
+    Keep duration inside the range h3 accepts. Nothing upstream validates it —
+    the schemas take a plain int — so a workflow step configured with the shared
+    1-30s slider would otherwise send a value the model rejects.
+    """
+    return max(MIN_DURATION, min(MAX_DURATION, int(duration)))
 
 
 class MiniMaxH3Model(ImageModel):
@@ -61,7 +74,7 @@ class MiniMaxH3Model(ImageModel):
         aspect_ratio: str = "16:9",
         last_frame_bytes: Optional[bytes] = None,
         save_audio: bool = True,
-        resolution: str = "2K",
+        resolution: str = "768P",
         reference_image_urls: Optional[List[str]] = None,
         reference_video_urls: Optional[List[str]] = None,
         reference_audio_urls: Optional[List[str]] = None,
@@ -78,6 +91,7 @@ class MiniMaxH3Model(ImageModel):
         ref_images = _clean_urls(reference_image_urls)
         ref_videos = _clean_urls(reference_video_urls)
         ref_audios = _clean_urls(reference_audio_urls)
+        duration = _clamp_duration(duration)
 
         payload = {
             "prompt": prompt,
