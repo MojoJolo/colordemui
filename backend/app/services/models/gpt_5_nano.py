@@ -38,6 +38,11 @@ class Gpt5NanoModel(ImageModel):
         if not prompt:
             raise ValueError("gpt-5-nano requires a prompt")
 
+        # Only prompt and image_input are sent. The model also accepts messages,
+        # system_prompt, verbosity, reasoning_effort and max_completion_tokens;
+        # their defaults (reasoning_effort=minimal, verbosity=medium) suit prompt
+        # writing, and minimal effort avoids the empty response you get when
+        # reasoning consumes the whole token budget.
         payload = {"prompt": prompt}
         if image_bytes is not None:
             payload["image_input"] = [io.BytesIO(image_bytes)]
