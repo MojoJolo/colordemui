@@ -1545,6 +1545,11 @@ body {
   flex-direction: column;
   gap: 0.4rem;
 }
+/* Keep the "show older" toggle its own width — the column flex would
+   otherwise stretch it across the whole panel. */
+.wf-ref-more {
+  align-self: flex-start;
+}
 
 .wf-ref-picker-actions {
   display: flex;

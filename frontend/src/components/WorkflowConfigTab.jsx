@@ -36,6 +36,22 @@ function normalizeStep(s) {
   };
 }
 
+// How many unpicked images the reference picker shows before "Show older".
+const REF_PICKER_LIMIT = 20;
+
+/**
+ * Selected images first, then the most recent of the rest. The pin matters:
+ * without it a picked image older than the limit would fall out of the grid
+ * while staying selected, leaving no way to see or unpick it.
+ * `images` arrives newest-first, and both halves keep that order.
+ */
+function orderRefImages(images, selectedIds, showAll) {
+  const picked = (img) => selectedIds.includes(img.image_id);
+  const selected = images.filter(picked);
+  const rest = images.filter((img) => !picked(img));
+  return [...selected, ...(showAll ? rest : rest.slice(0, REF_PICKER_LIMIT))];
+}
+
 const DEFAULT_WORKFLOW = () => ({
   name: "",
   steps: [DEFAULT_STEP()],
@@ -74,6 +90,7 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [error, setError] = useState(null);
   const [expandedRunId, setExpandedRunId] = useState(null);
   const [uploadingStep, setUploadingStep] = useState(null);
+  const [expandedPickers, setExpandedPickers] = useState({});
   const pollRef = useRef(null);
   const uploadInputRefs = useRef({});
 
@@ -134,6 +151,7 @@ export default function WorkflowConfigTab({ onExpand }) {
       enabled: wf.enabled,
     });
     setIsNew(false);
+    setExpandedPickers({});
     setError(null);
   }
 
@@ -143,6 +161,7 @@ export default function WorkflowConfigTab({ onExpand }) {
     setIsNew(true);
     setRuns([]);
     setWfImages([]);
+    setExpandedPickers({});
     setError(null);
   }
 
@@ -847,27 +866,44 @@ export default function WorkflowConfigTab({ onExpand }) {
                             onChange={(e) => { handleStepUpload(i, e.target.files, isTextModel); e.target.value = ""; }}
                           />
                           {(() => {
-                            const refImages = allImages.filter(isPickableImage);
-                            return refImages.length === 0 ? (
+                            const pickable = allImages.filter(isPickableImage);
+                            const selectedIds = step.initial_image_ids || [];
+                            const showAll = !!expandedPickers[i];
+                            const refImages = orderRefImages(pickable, selectedIds, showAll);
+                            const hidden = pickable.length - refImages.length;
+                            return pickable.length === 0 ? (
                               <p className="wf-hint">
                                 No images yet. Upload one above, or run a generation first.
                               </p>
                             ) : (
-                              <div className="wf-ref-grid">
-                                {refImages.map((img) => {
-                                  const selected = (step.initial_image_ids || []).includes(img.image_id);
-                                  return (
-                                    <div
-                                      key={img.image_id}
-                                      className={`wf-ref-thumb${selected ? " selected" : ""}`}
-                                      onClick={() => toggleRefImage(i, img.image_id, isTextModel)}
-                                    >
-                                      <img src={img.url} alt="" />
-                                      {selected && <span className="wf-ref-check">✓</span>}
-                                    </div>
-                                  );
-                                })}
-                              </div>
+                              <>
+                                <div className="wf-ref-grid">
+                                  {refImages.map((img) => {
+                                    const selected = selectedIds.includes(img.image_id);
+                                    return (
+                                      <div
+                                        key={img.image_id}
+                                        className={`wf-ref-thumb${selected ? " selected" : ""}`}
+                                        onClick={() => toggleRefImage(i, img.image_id, isTextModel)}
+                                      >
+                                        <img src={img.url} alt="" loading="lazy" />
+                                        {selected && <span className="wf-ref-check">✓</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                {(hidden > 0 || showAll) && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary wf-btn-sm wf-ref-more"
+                                    onClick={() =>
+                                      setExpandedPickers((p) => ({ ...p, [i]: !showAll }))
+                                    }
+                                  >
+                                    {showAll ? "Show fewer" : `Show ${hidden} older`}
+                                  </button>
+                                )}
+                              </>
                             );
                           })()}
                           {isTextModel && (
