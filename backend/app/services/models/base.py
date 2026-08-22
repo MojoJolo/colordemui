@@ -20,6 +20,20 @@ def _throttled_replicate_run(model_id: str, **kwargs):
         _last_call_time = time.time()
     return replicate.run(model_id, **kwargs)
 
+
+def is_video_bytes(data: Optional[bytes]) -> bool:
+    """Sniff a video container, so image-only inputs can reject an upstream clip."""
+    if not data:
+        return False
+    # MP4/MOV: 'ftyp' box at offset 4
+    if len(data) >= 8 and data[4:8] == b"ftyp":
+        return True
+    # WebM
+    if data[:4] == b"\x1a\x45\xdf\xa3":
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Shared style descriptors — used by all models.
 # Recraft prepends "subject: {text}, styles: ...".
