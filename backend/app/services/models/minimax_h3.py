@@ -2,7 +2,7 @@ import io
 import os
 from typing import List, Optional
 
-from app.services.models.base import ImageModel
+from app.services.models.base import ImageModel, is_video_bytes
 
 
 def _clean_urls(urls: Optional[List[str]]) -> List[str]:
@@ -35,7 +35,7 @@ class MiniMaxH3Model(ImageModel):
 
     @property
     def accepts_image(self) -> bool:
-        return False  # first frame is optional — no upload required
+        return True  # optional first frame; requires_image stays False
 
     @property
     def supports_duration(self) -> bool:
@@ -88,10 +88,18 @@ class MiniMaxH3Model(ImageModel):
             "reference_video_urls": ref_videos,
             "reference_audio_urls": ref_audios,
         }
-        if image_bytes is not None:
-            payload["first_frame_image"] = io.BytesIO(image_bytes)
+        # h3 takes a still as the first frame; an upstream video step's output
+        # would be rejected by the API, so drop it rather than send a clip.
+        first_frame = image_bytes if not is_video_bytes(image_bytes) else None
+        if first_frame is not None:
+            payload["first_frame_image"] = io.BytesIO(first_frame)
 
-        image_info = f"<{len(image_bytes)} bytes>" if image_bytes is not None else "none"
+        if first_frame is not None:
+            image_info = f"<{len(first_frame)} bytes>"
+        elif image_bytes is not None:
+            image_info = f"none (ignored <{len(image_bytes)} byte> video input)"
+        else:
+            image_info = "none"
         print(
             f"[minimax-h3] request: prompt={prompt!r} first_frame={image_info} "
             f"duration={duration}s ratio={aspect_ratio} resolution={resolution} "
