@@ -124,6 +124,24 @@ class ImageModel(ABC):
         return False
 
     @property
+    def is_media_merger(self) -> bool:
+        """
+        True if this merger works from an explicit ordered pick list of images
+        and videos rather than from whole preceding steps.
+        """
+        return False
+
+    @property
+    def is_processor(self) -> bool:
+        """True if this step transforms each file it is given instead of generating new ones."""
+        return False
+
+    @property
+    def supports_text_overlay(self) -> bool:
+        """Whether this step accepts the text-overlay parameters (size, position, blur, colour)."""
+        return False
+
+    @property
     def supports_duration(self) -> bool:
         """Whether this model accepts a duration parameter."""
         return False
@@ -165,6 +183,13 @@ class ImageModel(ABC):
     def generate(self, prompt: str, image_bytes: Optional[bytes] = None) -> bytes:
         """Run the model and return raw image bytes."""
         pass
+
+    def extension_for(self, data: bytes) -> str:
+        """
+        Extension for one produced file. Models whose output format depends on
+        their input (a text overlay returns a video for a video) override this.
+        """
+        return self.output_extension
 
     def generate_multi(
         self,

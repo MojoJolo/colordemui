@@ -62,6 +62,22 @@ class ScheduleUnit(str, Enum):
     days = "days"
 
 
+class MergeItem(BaseModel):
+    """
+    One entry in a media merger's ordered pick list.
+
+    `source` is "image" for a file picked from the gallery (identified by
+    `image_id`) or "step" for the output of the earlier step at `step_index`.
+    The same source may appear several times — each entry carries its own
+    `reverse` flag, so a clip can play forwards and then backwards.
+    """
+    source: str = "image"                  # "image" | "step"
+    image_id: Optional[str] = None
+    step_index: Optional[int] = None
+    reverse: bool = False
+    seconds: float = 3.0                   # how long a still is held on screen
+
+
 class WorkflowStep(BaseModel):
     step_id: str
     model: str
@@ -74,8 +90,13 @@ class WorkflowStep(BaseModel):
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None  # None = use previous step's output
     merge_source_steps: List[int] = []       # merger steps: [] = all preceding video steps
+    merge_items: List[MergeItem] = []        # media merger: ordered picks, duplicates allowed
     language: str = "english"
     caption_size: int = 40
+    overlay_text_size: int = 9               # text overlay: caption height as a % of the frame
+    overlay_position: str = "center"         # top | center | bottom
+    overlay_blur: int = 0                    # 0 = no blur, otherwise blur strength 1-100
+    overlay_color: str = "#ffffff"
 
 
 class WorkflowConfig(BaseModel):

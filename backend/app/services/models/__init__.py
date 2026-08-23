@@ -13,6 +13,8 @@ from app.services.models.minimax_h3 import MiniMaxH3Model
 from app.services.models.nano_banana_2 import NanoBanana2Model
 from app.services.models.tiktok_captions import TikTokCaptionsModel
 from app.services.models.merge_videos import MergeVideosModel
+from app.services.models.merge_media import MergeMediaModel
+from app.services.models.text_overlay import TextOverlayModel
 from app.services.models.gpt_5_nano import Gpt5NanoModel
 from app.services.models.upload_image import UploadImageModel
 
@@ -32,6 +34,8 @@ _REGISTRY: Dict[str, ImageModel] = {
     "nano-banana-2": NanoBanana2Model(),
     "tiktok-captions": TikTokCaptionsModel(),
     "merge-videos": MergeVideosModel(),
+    "merge-media": MergeMediaModel(),
+    "text-overlay": TextOverlayModel(),
     "gpt-5-nano": Gpt5NanoModel(),
     "upload-image": UploadImageModel(),
 }
@@ -53,11 +57,14 @@ def list_models() -> List[dict]:
             "requires_image": model.requires_image,
             "is_multi_reference": model.is_multi_reference,
             "is_merger": model.is_merger,
+            "is_media_merger": model.is_media_merger,
+            "is_processor": model.is_processor,
             "is_text": model.is_text,
             "is_upload": model.is_upload,
             "supports_aspect_ratio": model.supports_aspect_ratio,
             "supports_duration": model.supports_duration,
             "supports_captions": model.supports_captions,
+            "supports_text_overlay": model.supports_text_overlay,
             "supports_resolution": model.supports_resolution,
             "supports_reference_urls": model.supports_reference_urls,
             "output_extension": model.output_extension,
