@@ -39,11 +39,14 @@ class Gpt52Model(ImageModel):
         if not prompt:
             raise ValueError("gpt-5.2 requires a prompt")
 
-        # Only prompt and image_input are sent, matching gpt-5-nano. The openai/*
-        # models also accept messages, system_prompt, verbosity, reasoning_effort
-        # and max_completion_tokens; leaving those at their defaults avoids
-        # guessing at enum values, and the response is a stream of string chunks
-        # that _extract_text joins.
+        # Checked against the published schema: prompt and image_input match, and
+        # the output is an array of strings, which _extract_text joins. The rest
+        # are left at their defaults — messages (would override prompt entirely),
+        # system_prompt, verbosity=medium, and reasoning_effort=low, which is low
+        # enough that reasoning does not eat the whole budget and leave an empty
+        # response, so max_completion_tokens needs no raising. Note the effort
+        # values differ from gpt-5-nano's: 5.2 takes none/low/medium/high/xhigh,
+        # not 'minimal', so don't copy that across if this ever sets it.
         payload = {"prompt": prompt}
         if image_bytes is not None:
             payload["image_input"] = [io.BytesIO(image_bytes)]
