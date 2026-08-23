@@ -856,7 +856,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                             );
                           })()}
                           {isTextModel && (
-                            <p className="wf-hint">gpt-5-nano takes a single image — picking another replaces it.</p>
+                            <p className="wf-hint">{step.model} takes a single image — picking another replaces it.</p>
                           )}
                           {isUpload && stepImageCount === 0 && (
                             <div className="wf-warning">

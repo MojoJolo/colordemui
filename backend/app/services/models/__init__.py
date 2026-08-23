@@ -14,6 +14,7 @@ from app.services.models.nano_banana_2 import NanoBanana2Model
 from app.services.models.tiktok_captions import TikTokCaptionsModel
 from app.services.models.merge_videos import MergeVideosModel
 from app.services.models.gpt_5_nano import Gpt5NanoModel
+from app.services.models.gpt_5_2 import Gpt52Model
 from app.services.models.upload_image import UploadImageModel
 
 # ---------------------------------------------------------------------------
@@ -33,6 +34,7 @@ _REGISTRY: Dict[str, ImageModel] = {
     "tiktok-captions": TikTokCaptionsModel(),
     "merge-videos": MergeVideosModel(),
     "gpt-5-nano": Gpt5NanoModel(),
+    "gpt-5.2": Gpt52Model(),
     "upload-image": UploadImageModel(),
 }
 
