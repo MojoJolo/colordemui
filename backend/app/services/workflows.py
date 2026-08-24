@@ -29,6 +29,21 @@ def _load_images_by_ids(image_ids: List[str]) -> List[bytes]:
     return [(GENERATED_DIR / f).read_bytes() for f in _filenames_by_ids(image_ids)]
 
 
+def _load_media_by_id(image_id: str) -> bytes:
+    """
+    Load one picked file. Unlike _load_images_by_ids this raises instead of
+    skipping, because a merge list names each file explicitly and silently
+    dropping one would reorder the result.
+    """
+    filenames = _filenames_by_ids([image_id])
+    if not filenames:
+        raise ValueError(
+            f"A selected file is no longer on disk (id {image_id}). "
+            "Re-pick it on the step."
+        )
+    return (GENERATED_DIR / filenames[0]).read_bytes()
+
+
 def _derive_slug(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
     return slug or "workflow"
@@ -183,8 +198,13 @@ def _build_step(s) -> WorkflowStep:
         initial_image_ids=getattr(s, "initial_image_ids", []),
         source_step_index=getattr(s, "source_step_index", None),
         merge_source_steps=getattr(s, "merge_source_steps", []),
+        merge_items=getattr(s, "merge_items", []),
         language=getattr(s, "language", "english"),
         caption_size=getattr(s, "caption_size", 40),
+        overlay_text_size=getattr(s, "overlay_text_size", 9),
+        overlay_position=getattr(s, "overlay_position", "center"),
+        overlay_blur=getattr(s, "overlay_blur", 0),
+        overlay_color=getattr(s, "overlay_color", "#ffffff"),
     )
 
 
@@ -302,6 +322,65 @@ def _collect_merge_clips(
     return clips
 
 
+def _collect_merge_items(
+    step: WorkflowStep,
+    index: int,
+    wf: WorkflowConfig,
+    step_outputs: dict,
+) -> List[dict]:
+    """
+    Build the media merger's playlist from its ordered picks.
+
+    A "step" pick expands to every file that step produced, so one entry can
+    stand for a multi-output step; an "image" pick is a single file from the
+    gallery. Duplicates are kept as-is — repeating a clip, once forwards and
+    once reversed, is the point.
+    """
+    if not step.merge_items:
+        raise ValueError(
+            f"Step {index + 1} merges media but nothing is selected. "
+            "Pick the images and videos to join, in order."
+        )
+
+    items: List[dict] = []
+    for pos, pick in enumerate(step.merge_items):
+        label = f"Step {index + 1} item {pos + 1}"
+        if pick.source == "step":
+            src = pick.step_index
+            if src is None or not 0 <= src < index:
+                raise ValueError(
+                    f"{label} points at Step {(src or 0) + 1}, which does not come before it."
+                )
+            outputs = step_outputs.get(src, [])
+            if not outputs:
+                raise ValueError(
+                    f"{label} takes Step {src + 1}'s output, but that step produced no "
+                    "image or video."
+                )
+            for k, data in enumerate(outputs):
+                items.append({
+                    "data": data,
+                    "reverse": pick.reverse,
+                    "seconds": pick.seconds,
+                    "label": f"{label} (Step {src + 1} output {k + 1})",
+                })
+        else:
+            if not pick.image_id:
+                raise ValueError(f"{label} has no file selected.")
+            items.append({
+                "data": _load_media_by_id(pick.image_id),
+                "reverse": pick.reverse,
+                "seconds": pick.seconds,
+                "label": label,
+            })
+
+    if len(items) < 2:
+        raise ValueError(
+            f"Step {index + 1} needs at least 2 items to merge but got {len(items)}."
+        )
+    return items
+
+
 def _generate_kwargs(model, step: WorkflowStep) -> dict:
     kwargs = {}
     if model.supports_duration:
@@ -313,6 +392,17 @@ def _generate_kwargs(model, step: WorkflowStep) -> dict:
     if model.supports_captions:
         kwargs.update(language=step.language, caption_size=step.caption_size)
     return kwargs
+
+
+def _processor_kwargs(model, step: WorkflowStep) -> dict:
+    if not model.supports_text_overlay:
+        return {}
+    return {
+        "overlay_text_size": step.overlay_text_size,
+        "overlay_position": step.overlay_position,
+        "overlay_blur": step.overlay_blur,
+        "overlay_color": step.overlay_color,
+    }
 
 
 def run_workflow(workflow_id: str, run_id: str) -> None:
@@ -365,9 +455,22 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
                         f"Step {i + 1} supplies uploaded images but none are selected. "
                         "Upload or pick an image on that step."
                     )
+            elif model.is_media_merger:
+                items = _collect_merge_items(step, i, wf, step_outputs)
+                produced_bytes.append(model.merge_media(items))
             elif model.is_merger:
                 clips = _collect_merge_clips(step, i, wf, step_outputs)
                 produced_bytes.append(model.merge(clips))
+            elif model.is_processor:
+                if not ref_bytes:
+                    raise ValueError(
+                        f"Step {i + 1} transforms an image or video but got none. "
+                        "Put it after a step that produces one, or pick a file on the step."
+                    )
+                for data in ref_bytes:
+                    produced_bytes.append(
+                        model.process(data, prompt, **_processor_kwargs(model, step))
+                    )
             else:
                 for j in range(step.num_outputs):
                     if model.is_multi_reference:
@@ -391,7 +494,7 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
             else:
                 filenames = []
                 for k, img_bytes in enumerate(produced_bytes):
-                    fname = f"{run_id}_step{i}_{k}{model.output_extension}"
+                    fname = f"{run_id}_step{i}_{k}{model.extension_for(img_bytes)}"
                     (output_dir / fname).write_bytes(img_bytes)
                     filenames.append(f"{wf.slug}/{fname}")
 
@@ -478,4 +581,6 @@ def delete_workflow_image(workflow_id: str, image_id: str) -> bool:
 def get_run_progress(run: WorkflowRunRecord, wf: WorkflowConfig) -> dict:
     total = sum(s.num_outputs for s in wf.steps)
     completed = sum(len(sr.image_filenames) for sr in run.step_results if sr.status == "done")
-    return {"total": total, "completed": completed}
+    # A processor step produces one file per input, a count the config cannot
+    # know, so keep the bar from running past 100%.
+    return {"total": max(total, completed), "completed": completed}

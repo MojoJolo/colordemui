@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import ImageGrid from "./ImageGrid";
 import { scaleViaCanvas } from "./FrameSlot";
-import { isPickableImage, isTextFile, isVideoFile } from "../mediaTypes";
+import { isPickableImage, isPickableMedia, isTextFile, isVideoFile } from "../mediaTypes";
 
 const DEFAULT_STEP = () => ({
   step_id: null,
@@ -16,8 +16,13 @@ const DEFAULT_STEP = () => ({
   initial_image_ids: [],
   source_step_index: null,
   merge_source_steps: [],
+  merge_items: [],
   language: "english",
   caption_size: 40,
+  overlay_text_size: 9,
+  overlay_position: "center",
+  overlay_blur: 0,
+  overlay_color: "#ffffff",
 });
 
 // Fill in fields missing from workflows saved before they existed
@@ -31,8 +36,13 @@ function normalizeStep(s) {
     initial_image_ids: s.initial_image_ids || [],
     source_step_index: s.source_step_index ?? null,
     merge_source_steps: s.merge_source_steps || [],
+    merge_items: s.merge_items || [],
     language: s.language || "english",
     caption_size: s.caption_size ?? 40,
+    overlay_text_size: s.overlay_text_size ?? 9,
+    overlay_position: s.overlay_position || "center",
+    overlay_blur: s.overlay_blur ?? 0,
+    overlay_color: s.overlay_color || "#ffffff",
   };
 }
 
@@ -171,6 +181,14 @@ export default function WorkflowConfigTab({ onExpand }) {
       merge_source_steps: (s.merge_source_steps || [])
         .map(mapIndex)
         .filter((i) => i != null),
+      merge_items: (s.merge_items || [])
+        .map((item) =>
+          item.source === "step"
+            ? { ...item, step_index: mapIndex(item.step_index) }
+            : item
+        )
+        // A pick whose step is gone has nothing left to point at
+        .filter((item) => item.source !== "step" || item.step_index != null),
     }));
   }
 
@@ -318,6 +336,46 @@ export default function WorkflowConfigTab({ onExpand }) {
     return !!info && info.output_extension === ".mp4";
   }
 
+  // ---- Media merger pick list ----
+  // Entries are positional and may repeat, so every mutation goes through the
+  // index rather than through the picked file's id.
+
+  function setMergeItems(stepIndex, mutate) {
+    setDraft((d) => ({
+      ...d,
+      steps: d.steps.map((s, i) =>
+        i === stepIndex ? { ...s, merge_items: mutate(s.merge_items || []) } : s
+      ),
+    }));
+  }
+
+  function addMergeItem(stepIndex, item) {
+    setMergeItems(stepIndex, (items) => [
+      ...items,
+      { source: "image", image_id: null, step_index: null, reverse: false, seconds: 3, ...item },
+    ]);
+  }
+
+  function updateMergeItem(stepIndex, itemIndex, key, value) {
+    setMergeItems(stepIndex, (items) =>
+      items.map((it, k) => (k === itemIndex ? { ...it, [key]: value } : it))
+    );
+  }
+
+  function removeMergeItem(stepIndex, itemIndex) {
+    setMergeItems(stepIndex, (items) => items.filter((_, k) => k !== itemIndex));
+  }
+
+  function moveMergeItem(stepIndex, itemIndex, dir) {
+    setMergeItems(stepIndex, (items) => {
+      const target = itemIndex + dir;
+      if (target < 0 || target >= items.length) return items;
+      const next = [...items];
+      [next[itemIndex], next[target]] = [next[target], next[itemIndex]];
+      return next;
+    });
+  }
+
   function toggleMergeSource(stepIndex, sourceIndex) {
     setDraft((d) => {
       const steps = d.steps.map((s, i) => {
@@ -356,8 +414,13 @@ export default function WorkflowConfigTab({ onExpand }) {
           initial_image_ids: s.initial_image_ids || [],
           source_step_index: s.source_step_index ?? null,
           merge_source_steps: s.merge_source_steps || [],
+          merge_items: s.merge_items || [],
           language: s.language || "english",
           caption_size: s.caption_size ?? 40,
+          overlay_text_size: s.overlay_text_size ?? 9,
+          overlay_position: s.overlay_position || "center",
+          overlay_blur: s.overlay_blur ?? 0,
+          overlay_color: s.overlay_color || "#ffffff",
         })),
         slot_lists: draft.slot_lists,
         schedule_value: draft.schedule_value,
@@ -605,15 +668,22 @@ export default function WorkflowConfigTab({ onExpand }) {
                   ? step.source_step_index
                   : defaultSourceIdx;
                 const isMerger = !!(modelInfo && modelInfo.is_merger);
+                const isMediaMerger = !!(modelInfo && modelInfo.is_media_merger);
+                const isProcessor = !!(modelInfo && modelInfo.is_processor);
                 const isTextModel = !!(modelInfo && modelInfo.is_text);
                 const isUpload = !!(modelInfo && modelInfo.is_upload);
+                const showOverlay = !!(modelInfo && modelInfo.supports_text_overlay);
                 const chainWarning = isChained && modelInfo && !isMerger && !isUpload
                   && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
                 const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio && !isUpload;
                 const showDuration = modelInfo && modelInfo.supports_duration;
                 const showResolution = modelInfo && modelInfo.supports_resolution;
                 const showRefPicker = modelInfo
-                  && (modelInfo.is_multi_reference || modelInfo.is_text || modelInfo.is_upload);
+                  && (modelInfo.is_multi_reference || modelInfo.is_text
+                      || modelInfo.is_upload || isProcessor);
+                // Merge and overlay steps hand the file straight to ffmpeg, so
+                // videos and vectors are pickable there but not for a model.
+                const pickMedia = isProcessor || isMediaMerger;
                 const stepImageCount = (step.initial_image_ids || []).length;
                 const showCaptions = modelInfo && modelInfo.supports_captions;
                 // Earlier steps this merger can pull clips from, and how many clips that yields
@@ -674,7 +744,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                             }
                           </select>
                         </div>
-                        {!isMerger && !isUpload && (
+                        {!isMerger && !isUpload && !isProcessor && (
                           <div className="wf-field wf-field-outputs">
                             <label className="prompt-label">Outputs</label>
                             <input
@@ -785,6 +855,68 @@ export default function WorkflowConfigTab({ onExpand }) {
                             />
                           </div>
                         )}
+                        {showOverlay && (
+                          <div className="wf-field">
+                            <label className="prompt-label">
+                              Text size: {step.overlay_text_size ?? 9}% of height
+                            </label>
+                            <input
+                              type="range"
+                              min={3}
+                              max={25}
+                              value={step.overlay_text_size ?? 9}
+                              onChange={(e) => updateStep(i, "overlay_text_size", parseInt(e.target.value))}
+                              className="wf-duration-slider"
+                            />
+                          </div>
+                        )}
+                        {showOverlay && (
+                          <div className="wf-field">
+                            <label className="prompt-label">Text position</label>
+                            <select
+                              className="klein-input"
+                              value={step.overlay_position || "center"}
+                              onChange={(e) => updateStep(i, "overlay_position", e.target.value)}
+                            >
+                              <option value="top">top</option>
+                              <option value="center">center</option>
+                              <option value="bottom">bottom</option>
+                            </select>
+                          </div>
+                        )}
+                        {showOverlay && (
+                          <div className="wf-field">
+                            <label className="wf-toggle-label">
+                              <input
+                                type="checkbox"
+                                checked={(step.overlay_blur ?? 0) > 0}
+                                onChange={(e) => updateStep(i, "overlay_blur", e.target.checked ? 30 : 0)}
+                              />
+                              <span>Blur {(step.overlay_blur ?? 0) > 0 ? `· ${step.overlay_blur}` : ""}</span>
+                            </label>
+                            {(step.overlay_blur ?? 0) > 0 && (
+                              <input
+                                type="range"
+                                min={1}
+                                max={100}
+                                value={step.overlay_blur}
+                                onChange={(e) => updateStep(i, "overlay_blur", parseInt(e.target.value))}
+                                className="wf-duration-slider"
+                              />
+                            )}
+                          </div>
+                        )}
+                        {showOverlay && (
+                          <div className="wf-field wf-field-color">
+                            <label className="prompt-label">Text colour</label>
+                            <input
+                              type="color"
+                              className="klein-input wf-color-input"
+                              value={step.overlay_color || "#ffffff"}
+                              onChange={(e) => updateStep(i, "overlay_color", e.target.value)}
+                            />
+                          </div>
+                        )}
                       </div>
 
                       {chainWarning && sourceIdx != null && (
@@ -797,7 +929,9 @@ export default function WorkflowConfigTab({ onExpand }) {
                         <div className="wf-ref-picker">
                           <div className="wf-ref-picker-header">
                             <label className="prompt-label">
-                              {isUpload ? "Images" : isTextModel ? "Reference Image" : "Reference Images"}
+                              {isUpload ? "Images"
+                                : isProcessor ? "Input image or video"
+                                : isTextModel ? "Reference Image" : "Reference Images"}
                               {isUpload && (
                                 <span className="wf-ref-hint"> — later steps can use these with "From step → Step {i + 1}"</span>
                               )}
@@ -832,10 +966,13 @@ export default function WorkflowConfigTab({ onExpand }) {
                             onChange={(e) => { handleStepUpload(i, e.target.files, isTextModel); e.target.value = ""; }}
                           />
                           {(() => {
-                            const refImages = allImages.filter(isPickableImage).reverse();
+                            const refImages = allImages
+                              .filter(pickMedia ? isPickableMedia : isPickableImage)
+                              .reverse();
                             return refImages.length === 0 ? (
                               <p className="wf-hint">
-                                No images yet. Upload one above, or run a generation first.
+                                No {pickMedia ? "files" : "images"} yet. Upload one above, or run a
+                                generation first.
                               </p>
                             ) : (
                               <div className="wf-ref-grid">
@@ -845,9 +982,14 @@ export default function WorkflowConfigTab({ onExpand }) {
                                     <div
                                       key={img.image_id}
                                       className={`wf-ref-thumb${selected ? " selected" : ""}`}
-                                      onClick={() => toggleRefImage(i, img.image_id, isTextModel)}
+                                      onClick={() => toggleRefImage(i, img.image_id, isProcessor || isTextModel)}
                                     >
-                                      <img src={img.url} alt="" />
+                                      {isVideoFile(img.filename) ? (
+                                        <>
+                                          <video src={`${img.url}#t=0.1`} muted playsInline preload="metadata" />
+                                          <span className="wf-ref-video-badge">▶</span>
+                                        </>
+                                      ) : <img src={img.url} alt="" />}
                                       {selected && <span className="wf-ref-check">✓</span>}
                                     </div>
                                   );
@@ -858,6 +1000,11 @@ export default function WorkflowConfigTab({ onExpand }) {
                           {isTextModel && (
                             <p className="wf-hint">{step.model} takes a single image — picking another replaces it.</p>
                           )}
+                          {isProcessor && (
+                            <p className="wf-hint">
+                              Only used when no earlier step feeds this one — picking another replaces it.
+                            </p>
+                          )}
                           {isUpload && stepImageCount === 0 && (
                             <div className="wf-warning">
                               No image selected — this step will fail the run. Upload one or pick from above.
@@ -866,7 +1013,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                         </div>
                       )}
 
-                      {isMerger && (
+                      {isMerger && !isMediaMerger && (
                         <div className="wf-merge-picker">
                           <label className="prompt-label">Merge videos from</label>
                           {videoStepIdxs.length === 0 ? (
@@ -908,16 +1055,181 @@ export default function WorkflowConfigTab({ onExpand }) {
                         </div>
                       )}
 
+                      {isMediaMerger && (() => {
+                        const items = step.merge_items || [];
+                        const pickable = allImages.filter(isPickableMedia).reverse();
+                        const byId = new Map(allImages.map((img) => [img.image_id, img]));
+                        const stepIdxs = draft.steps.slice(0, i).map((_, si) => si).filter((si) => !isTextStep(si));
+                        return (
+                          <div className="wf-merge-picker">
+                            <label className="prompt-label">Merge list</label>
+                            <p className="wf-hint">
+                              Files play in this order. Add the same file twice to repeat it —
+                              tick <strong>Reverse</strong> on one copy to play that clip backwards.
+                            </p>
+
+                            {items.length === 0 ? (
+                              <div className="wf-warning">
+                                Nothing selected yet — pick at least 2 files below.
+                              </div>
+                            ) : (
+                              <ol className="wf-merge-items">
+                                {items.map((item, k) => {
+                                  const img = item.source === "image" ? byId.get(item.image_id) : null;
+                                  const missing = item.source === "image" && !img;
+                                  const isVideo = !!img && isVideoFile(img.filename);
+                                  return (
+                                    <li key={k} className="wf-merge-item">
+                                      <span className="wf-merge-item-num">{k + 1}</span>
+                                      <div className="wf-merge-item-thumb">
+                                        {item.source === "step" ? (
+                                          <span className="wf-merge-step-badge">Step {item.step_index + 1}</span>
+                                        ) : missing ? (
+                                          <span className="wf-merge-step-badge missing">gone</span>
+                                        ) : isVideo ? (
+                                          <>
+                                            <video src={`${img.url}#t=0.1`} muted playsInline preload="metadata" />
+                                            <span className="wf-ref-video-badge">▶</span>
+                                          </>
+                                        ) : (
+                                          <img src={img.url} alt="" />
+                                        )}
+                                      </div>
+                                      <div className="wf-merge-item-controls">
+                                        <label className="wf-toggle-label">
+                                          <input
+                                            type="checkbox"
+                                            checked={!!item.reverse}
+                                            onChange={(e) => updateMergeItem(i, k, "reverse", e.target.checked)}
+                                          />
+                                          <span>Reverse</span>
+                                        </label>
+                                        {!isVideo && (
+                                          <label className="wf-merge-seconds">
+                                            <span>Hold</span>
+                                            <input
+                                              type="number"
+                                              className="klein-input wf-num-input"
+                                              min={0.2}
+                                              max={30}
+                                              step={0.5}
+                                              value={item.seconds ?? 3}
+                                              onChange={(e) =>
+                                                updateMergeItem(i, k, "seconds", parseFloat(e.target.value) || 3)
+                                              }
+                                            />
+                                            <span>s</span>
+                                          </label>
+                                        )}
+                                      </div>
+                                      <div className="wf-merge-item-actions">
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary wf-btn-sm"
+                                          onClick={() => moveMergeItem(i, k, -1)}
+                                          disabled={k === 0}
+                                          title="Move earlier"
+                                        >▲</button>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary wf-btn-sm"
+                                          onClick={() => moveMergeItem(i, k, 1)}
+                                          disabled={k === items.length - 1}
+                                          title="Move later"
+                                        >▼</button>
+                                        <button
+                                          type="button"
+                                          className="btn btn-danger wf-btn-sm"
+                                          onClick={() => removeMergeItem(i, k)}
+                                          title="Remove"
+                                        >✕</button>
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ol>
+                            )}
+
+                            {items.length === 1 && (
+                              <div className="wf-warning">Only 1 item selected — merging needs at least 2.</div>
+                            )}
+
+                            {stepIdxs.length > 0 && (
+                              <div className="wf-merge-step-adds">
+                                <span className="wf-hint">Add an earlier step's output:</span>
+                                {stepIdxs.map((si) => (
+                                  <button
+                                    key={si}
+                                    type="button"
+                                    className="btn btn-secondary wf-btn-sm"
+                                    onClick={() => addMergeItem(i, { source: "step", step_index: si })}
+                                  >
+                                    + Step {si + 1}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="wf-ref-picker-header">
+                              <label className="prompt-label">Add a generated file</label>
+                              <div className="wf-ref-picker-actions">
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary wf-btn-sm"
+                                  onClick={() => api.getAllImages().then(setAllImages).catch(() => {})}
+                                  title="Refresh file list"
+                                >↻</button>
+                              </div>
+                            </div>
+                            {pickable.length === 0 ? (
+                              <p className="wf-hint">No generated files yet. Run a generation first.</p>
+                            ) : (
+                              <div className="wf-ref-grid">
+                                {pickable.map((img) => {
+                                  const count = items.filter((it) => it.image_id === img.image_id).length;
+                                  return (
+                                    <div
+                                      key={img.image_id}
+                                      className={`wf-ref-thumb${count ? " selected" : ""}`}
+                                      title="Click to append to the merge list"
+                                      onClick={() => addMergeItem(i, { source: "image", image_id: img.image_id })}
+                                    >
+                                      {isVideoFile(img.filename) ? (
+                                        <>
+                                          <video src={`${img.url}#t=0.1`} muted playsInline preload="metadata" />
+                                          <span className="wf-ref-video-badge">▶</span>
+                                        </>
+                                      ) : <img src={img.url} alt="" />}
+                                      {count > 0 && <span className="wf-ref-check">{count}×</span>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       {!isMerger && !isUpload && (
                         <>
-                          <label className="prompt-label">Prompt template</label>
+                          <label className="prompt-label">
+                            {showOverlay ? "Overlay text" : "Prompt template"}
+                          </label>
                           <textarea
                             className="prompt-textarea"
                             value={step.prompt_template}
                             onChange={(e) => updateStep(i, "prompt_template", e.target.value)}
-                            placeholder='e.g. "A {subject} in {scene} wearing {outfit}"'
+                            placeholder={showOverlay
+                              ? 'e.g. "{text}" to use an earlier text step, or type a caption'
+                              : 'e.g. "A {subject} in {scene} wearing {outfit}"'}
                             rows={3}
                           />
+                          {showOverlay && (
+                            <p className="wf-hint">
+                              Drawn over the input as one big caption — long text wraps and shrinks
+                              to fit. Line breaks are kept.
+                            </p>
+                          )}
                           {textStepIdxs.length > 0 && (
                             <p className="wf-hint">
                               Text placeholders: <code>{"{text}"}</code> uses Step{" "}
