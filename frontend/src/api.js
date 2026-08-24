@@ -73,7 +73,7 @@ export async function uploadImage(imageData, label) {
 export async function createJob(prompts, model = "recraft-v3-svg", imageData = null, options = {}) {
   const {
     seed = null, numOutputs = 1, selectedImageId = null, duration = 5,
-    aspectRatio = "9:16", resolution = "2K", selectedLastFrameImageId = null, saveAudio = true,
+    aspectRatio = "9:16", resolution = "768P", selectedLastFrameImageId = null, saveAudio = true,
     referenceImageUrls = [], referenceVideoUrls = [], referenceAudioUrls = [],
     firstFrameData = null, lastFrameData = null,
     loraWeights = null, loraScale = 0.5, hfApiToken = null, promptUpsampling = false,

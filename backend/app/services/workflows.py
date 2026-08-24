@@ -193,7 +193,7 @@ def _build_step(s) -> WorkflowStep:
         prompt_template=s.prompt_template,
         aspect_ratio=getattr(s, "aspect_ratio", "9:16"),
         duration=getattr(s, "duration", 5),
-        resolution=getattr(s, "resolution", "2K"),
+        resolution=getattr(s, "resolution", "768P"),
         save_audio=getattr(s, "save_audio", True),
         initial_image_ids=getattr(s, "initial_image_ids", []),
         source_step_index=getattr(s, "source_step_index", None),

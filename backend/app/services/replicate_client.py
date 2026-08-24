@@ -1,8 +1,6 @@
 import os
 
-import requests
-
-from app.services.models.base import _throttled_replicate_run
+from app.services.models.base import _run_prediction, download_output
 
 
 def generate(prompt: str) -> bytes:
@@ -44,7 +42,7 @@ def generate(prompt: str) -> bytes:
         "book, open book, page border, frame, border"
     )
 
-    output = _throttled_replicate_run(
+    output = _run_prediction(
         "recraft-ai/recraft-v3-svg",
         input={
             "prompt": full_prompt,
@@ -72,9 +70,7 @@ def _to_bytes(output) -> bytes:
 
     # URL string → download it
     if isinstance(output, str) and output.startswith("http"):
-        resp = requests.get(output, timeout=60)
-        resp.raise_for_status()
-        return resp.content
+        return download_output(output)
 
     # Raw SVG/text string returned directly
     if isinstance(output, str):

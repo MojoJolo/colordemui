@@ -15,7 +15,7 @@ class CreateJobRequest(BaseModel):
     last_frame_data: Optional[str] = None               # base64 data URI upload for last frame
     duration: int = 5
     aspect_ratio: str = "9:16"
-    resolution: str = "2K"
+    resolution: str = "768P"
     save_audio: bool = True
     reference_image_urls: List[str] = []   # public URLs, e.g. for minimax-h3
     reference_video_urls: List[str] = []
@@ -64,7 +64,7 @@ class WorkflowStepRequest(BaseModel):
     prompt_template: str = ""
     aspect_ratio: str = "9:16"
     duration: int = 5
-    resolution: str = "2K"
+    resolution: str = "768P"
     save_audio: bool = True
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
@@ -94,7 +94,7 @@ class WorkflowStepResponse(BaseModel):
     prompt_template: str
     aspect_ratio: str = "9:16"
     duration: int = 5
-    resolution: str = "2K"
+    resolution: str = "768P"
     save_audio: bool = True
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
