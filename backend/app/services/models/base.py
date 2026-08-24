@@ -140,6 +140,20 @@ def download_output(url: str) -> bytes:
             )
             time.sleep(backoff)
 
+
+def is_video_bytes(data: Optional[bytes]) -> bool:
+    """Sniff a video container, so image-only inputs can reject an upstream clip."""
+    if not data:
+        return False
+    # MP4/MOV: 'ftyp' box at offset 4
+    if len(data) >= 8 and data[4:8] == b"ftyp":
+        return True
+    # WebM
+    if data[:4] == b"\x1a\x45\xdf\xa3":
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Shared style descriptors — used by all models.
 # Recraft prepends "subject: {text}, styles: ...".
@@ -230,6 +244,24 @@ class ImageModel(ABC):
         return False
 
     @property
+    def is_media_merger(self) -> bool:
+        """
+        True if this merger works from an explicit ordered pick list of images
+        and videos rather than from whole preceding steps.
+        """
+        return False
+
+    @property
+    def is_processor(self) -> bool:
+        """True if this step transforms each file it is given instead of generating new ones."""
+        return False
+
+    @property
+    def supports_text_overlay(self) -> bool:
+        """Whether this step accepts the text-overlay parameters (size, position, blur, colour)."""
+        return False
+
+    @property
     def supports_duration(self) -> bool:
         """Whether this model accepts a duration parameter."""
         return False
@@ -271,6 +303,13 @@ class ImageModel(ABC):
     def generate(self, prompt: str, image_bytes: Optional[bytes] = None) -> bytes:
         """Run the model and return raw image bytes."""
         pass
+
+    def extension_for(self, data: bytes) -> str:
+        """
+        Extension for one produced file. Models whose output format depends on
+        their input (a text overlay returns a video for a video) override this.
+        """
+        return self.output_extension
 
     def generate_multi(
         self,

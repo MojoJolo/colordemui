@@ -24,3 +24,12 @@ export function isPickableImage(img) {
     !isTextFile(img.filename)
   );
 }
+
+/**
+ * A finished output that a merge or overlay step can take as-is — videos and
+ * vectors included, since those steps hand the file to ffmpeg rather than to a
+ * model that only speaks raster.
+ */
+export function isPickableMedia(img) {
+  return img.status === "done" && !!img.url && !isTextFile(img.filename);
+}

@@ -16,6 +16,7 @@ import PromptForm from "./components/PromptForm";
 import Toolbar from "./components/Toolbar";
 import TikTokCaptionsForm from "./components/TikTokCaptionsForm";
 import Gpt5NanoForm from "./components/Gpt5NanoForm";
+import Gpt52Form from "./components/Gpt52Form";
 import WorkflowConfigTab from "./components/WorkflowConfigTab";
 import { isTextFile, isVideoFile } from "./mediaTypes";
 import "./styles.css";
@@ -295,6 +296,13 @@ export default function App() {
             GPT-5 Nano
           </button>
           <button
+            className={`tab${activePage === "gpt-5.2" ? " active" : ""}`}
+            onClick={() => setActivePage("gpt-5.2")}
+            type="button"
+          >
+            GPT-5.2
+          </button>
+          <button
             className={`tab${activePage === "workflow" ? " active" : ""}`}
             onClick={() => setActivePage("workflow")}
             type="button"
@@ -337,6 +345,9 @@ export default function App() {
         )}
         {activePage === "gpt-5-nano" && (
           <Gpt5NanoForm onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
+        )}
+        {activePage === "gpt-5.2" && (
+          <Gpt52Form onGenerate={handleGenerate} isGenerating={isGenerating} images={images} />
         )}
         {activePage === "workflow" && (
           <WorkflowConfigTab onExpand={setExpandedImage} />

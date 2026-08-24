@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict
 from pydantic import BaseModel
-from app.models import ImageStatus, JobStatus
+from app.models import ImageStatus, JobStatus, MergeItem
 
 
 class CreateJobRequest(BaseModel):
@@ -69,8 +69,13 @@ class WorkflowStepRequest(BaseModel):
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
     merge_source_steps: List[int] = []
+    merge_items: List[MergeItem] = []
     language: str = "english"
     caption_size: int = 40
+    overlay_text_size: int = 9
+    overlay_position: str = "center"
+    overlay_blur: int = 0
+    overlay_color: str = "#ffffff"
 
 
 class WorkflowRequest(BaseModel):
@@ -94,8 +99,13 @@ class WorkflowStepResponse(BaseModel):
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
     merge_source_steps: List[int] = []
+    merge_items: List[MergeItem] = []
     language: str = "english"
     caption_size: int = 40
+    overlay_text_size: int = 9
+    overlay_position: str = "center"
+    overlay_blur: int = 0
+    overlay_color: str = "#ffffff"
 
 
 class WorkflowResponse(BaseModel):

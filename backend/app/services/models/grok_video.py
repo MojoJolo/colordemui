@@ -2,17 +2,7 @@ import io
 import os
 from typing import Optional
 
-from app.services.models.base import ImageModel
-
-
-def _is_video(data: bytes) -> bool:
-    # MP4/MOV: 'ftyp' box at offset 4
-    if len(data) >= 8 and data[4:8] == b"ftyp":
-        return True
-    # WebM
-    if data[:4] == b"\x1a\x45\xdf\xa3":
-        return True
-    return False
+from app.services.models.base import ImageModel, is_video_bytes as _is_video
 
 
 class GrokVideoModel(ImageModel):
@@ -31,7 +21,7 @@ class GrokVideoModel(ImageModel):
 
     @property
     def accepts_image(self) -> bool:
-        return False  # image is optional — no upload required
+        return True  # optional image/video input; requires_image stays False
 
     @property
     def supports_duration(self) -> bool:
