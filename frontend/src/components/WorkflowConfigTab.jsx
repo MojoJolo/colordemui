@@ -1108,7 +1108,14 @@ export default function WorkflowConfigTab({ onExpand }) {
 
                       {isMediaMerger && (() => {
                         const items = step.merge_items || [];
-                        const pickable = allImages.filter(isPickableMedia).reverse();
+                        const pickable = allImages.filter(isPickableMedia);
+                        // Files already in the merge list stay visible however old they
+                        // are — one dropped by the cap would still be merged into the
+                        // output with no way to see or remove it from the grid.
+                        const chosenIds = items.map((it) => it.image_id).filter(Boolean);
+                        const mergeShowAll = !!expandedPickers[`merge${i}`];
+                        const shown = orderRefImages(pickable, chosenIds, mergeShowAll);
+                        const mergeHidden = pickable.length - shown.length;
                         const byId = new Map(allImages.map((img) => [img.image_id, img]));
                         const stepIdxs = draft.steps.slice(0, i).map((_, si) => si).filter((si) => !isTextStep(si));
                         return (
@@ -1235,27 +1242,40 @@ export default function WorkflowConfigTab({ onExpand }) {
                             {pickable.length === 0 ? (
                               <p className="wf-hint">No generated files yet. Run a generation first.</p>
                             ) : (
-                              <div className="wf-ref-grid">
-                                {pickable.map((img) => {
-                                  const count = items.filter((it) => it.image_id === img.image_id).length;
-                                  return (
-                                    <div
-                                      key={img.image_id}
-                                      className={`wf-ref-thumb${count ? " selected" : ""}`}
-                                      title="Click to append to the merge list"
-                                      onClick={() => addMergeItem(i, { source: "image", image_id: img.image_id })}
-                                    >
-                                      {isVideoFile(img.filename) ? (
-                                        <>
-                                          <video src={`${img.url}#t=0.1`} muted playsInline preload="metadata" />
-                                          <span className="wf-ref-video-badge">▶</span>
-                                        </>
-                                      ) : <img src={img.url} alt="" />}
-                                      {count > 0 && <span className="wf-ref-check">{count}×</span>}
-                                    </div>
-                                  );
-                                })}
-                              </div>
+                              <>
+                                <div className="wf-ref-grid">
+                                  {shown.map((img) => {
+                                    const count = items.filter((it) => it.image_id === img.image_id).length;
+                                    return (
+                                      <div
+                                        key={img.image_id}
+                                        className={`wf-ref-thumb${count ? " selected" : ""}`}
+                                        title="Click to append to the merge list"
+                                        onClick={() => addMergeItem(i, { source: "image", image_id: img.image_id })}
+                                      >
+                                        {isVideoFile(img.filename) ? (
+                                          <>
+                                            <video src={`${img.url}#t=0.1`} muted playsInline preload="metadata" />
+                                            <span className="wf-ref-video-badge">▶</span>
+                                          </>
+                                        ) : <img src={img.url} alt="" loading="lazy" />}
+                                        {count > 0 && <span className="wf-ref-check">{count}×</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                {(mergeHidden > 0 || mergeShowAll) && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary wf-btn-sm wf-ref-more"
+                                    onClick={() =>
+                                      setExpandedPickers((p) => ({ ...p, [`merge${i}`]: !mergeShowAll }))
+                                    }
+                                  >
+                                    {mergeShowAll ? "Show fewer" : `Show ${mergeHidden} older`}
+                                  </button>
+                                )}
+                              </>
                             )}
                           </div>
                         );
