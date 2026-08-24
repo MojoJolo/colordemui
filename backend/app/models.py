@@ -96,7 +96,9 @@ class WorkflowStep(BaseModel):
     overlay_text_size: int = 9               # text overlay: caption height as a % of the frame
     overlay_position: str = "center"         # top | center | bottom
     overlay_blur: int = 0                    # 0 = no blur, otherwise blur strength 1-100
-    overlay_color: str = "#ffffff"
+    overlay_color: str = "#ffffff"          # text fill
+    overlay_outline_color: str = "#000000"   # outline drawn around the text
+    overlay_outline_width: int = 100         # % of the minimal outline; 0 = none
 
 
 class WorkflowConfig(BaseModel):

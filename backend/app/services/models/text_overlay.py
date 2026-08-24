@@ -56,6 +56,8 @@ class TextOverlayModel(ImageModel):
         overlay_position: str = "center",
         overlay_blur: int = 0,
         overlay_color: str = "#ffffff",
+        overlay_outline_color: str = "#000000",
+        overlay_outline_width: int = 100,
     ) -> bytes:
         if not data:
             raise ValueError(
@@ -69,4 +71,6 @@ class TextOverlayModel(ImageModel):
             position=overlay_position,
             blur=overlay_blur,
             color=overlay_color,
+            outline_color=overlay_outline_color,
+            outline_width=overlay_outline_width,
         )

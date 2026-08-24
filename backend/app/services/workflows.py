@@ -205,6 +205,8 @@ def _build_step(s) -> WorkflowStep:
         overlay_position=getattr(s, "overlay_position", "center"),
         overlay_blur=getattr(s, "overlay_blur", 0),
         overlay_color=getattr(s, "overlay_color", "#ffffff"),
+        overlay_outline_color=getattr(s, "overlay_outline_color", "#000000"),
+        overlay_outline_width=getattr(s, "overlay_outline_width", 100),
     )
 
 
@@ -402,6 +404,8 @@ def _processor_kwargs(model, step: WorkflowStep) -> dict:
         "overlay_position": step.overlay_position,
         "overlay_blur": step.overlay_blur,
         "overlay_color": step.overlay_color,
+        "overlay_outline_color": step.overlay_outline_color,
+        "overlay_outline_width": step.overlay_outline_width,
     }
 
 

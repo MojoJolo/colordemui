@@ -291,6 +291,8 @@ def _wf_to_response(wf) -> WorkflowResponse:
             overlay_position=s.overlay_position,
             overlay_blur=s.overlay_blur,
             overlay_color=s.overlay_color,
+            overlay_outline_color=s.overlay_outline_color,
+            overlay_outline_width=s.overlay_outline_width,
         ) for s in wf.steps],
         slot_lists=wf.slot_lists,
         schedule_value=wf.schedule_value,

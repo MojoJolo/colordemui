@@ -34,6 +34,15 @@ _BOTTOM_MARGIN = 0.93
 _MIN_FONT_PX = 12
 _FALLBACK_GLYPH_RATIO = 0.55  # average glyph width as a fraction of font size
 
+# Outline thickness as a fraction of the font size. Deliberately thin: enough to
+# separate white text from a light frame, not enough to thicken the letterforms.
+_OUTLINE_RATIO = 0.022
+_MAX_OUTLINE_PERCENT = 12
+
+DEFAULT_COLOR = "#ffffff"
+DEFAULT_OUTLINE_COLOR = "#000000"
+DEFAULT_OUTLINE_WIDTH = 100  # percent of the built-in (minimal) outline thickness
+
 
 def _font(font_path: str, size: int):
     from PIL import ImageFont
@@ -91,8 +100,22 @@ def _layout(text: str, font_path: str, width: int, height: int, size_percent: in
     return _MIN_FONT_PX, _wrap(text, font_path, _MIN_FONT_PX, max_width)
 
 
+def _outline_width(size: int, outline_percent: int) -> int:
+    """
+    Pixel thickness of the outline. `outline_percent` scales the built-in
+    minimal outline: 100 keeps it, 0 turns it off, 200 doubles it.
+    """
+    outline_percent = max(0, min(400, outline_percent))
+    if outline_percent == 0:
+        return 0
+    px = size * _OUTLINE_RATIO * outline_percent / 100
+    return max(1, min(round(px), round(size * _MAX_OUTLINE_PERCENT / 100)))
+
+
 def _render_text_layer(text: str, width: int, height: int, size_percent: int,
-                       position: str, color: str):
+                       position: str, color: str,
+                       outline_color: str = DEFAULT_OUTLINE_COLOR,
+                       outline_width: int = DEFAULT_OUTLINE_WIDTH):
     """Draw the caption onto a transparent RGBA layer the size of the frame."""
     from PIL import Image, ImageDraw
 
@@ -112,20 +135,19 @@ def _render_text_layer(text: str, width: int, height: int, size_percent: int,
 
     layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
-    stroke = max(2, round(size * 0.055))
-    shadow_offset = max(1, round(size * 0.05))
+    stroke = _outline_width(size, outline_width)
 
     for i, line in enumerate(lines):
         cx = width / 2
         cy = first_y + i * line_h + line_h / 2
-        # A soft drop shadow under the outline keeps light text readable on a
-        # light frame even when the blur is switched off.
-        draw.text((cx, cy + shadow_offset), line, font=font, anchor="mm",
-                  fill=(0, 0, 0, 110), stroke_width=stroke, stroke_fill=(0, 0, 0, 110))
-        draw.text((cx, cy), line, font=font, anchor="mm",
-                  fill=color, stroke_width=stroke, stroke_fill=(0, 0, 0, 220))
+        # One pass: the text in its own colour, ringed by a thin opaque outline.
+        # No drop shadow — the outline alone carries the contrast, which keeps
+        # the letterforms crisp instead of muddy.
+        draw.text((cx, cy), line, font=font, anchor="mm", fill=color,
+                  stroke_width=stroke, stroke_fill=outline_color if stroke else None)
 
-    print(f"[text-overlay] {len(lines)} line(s) @ {size}px · {position} · {width}x{height}")
+    print(f"[text-overlay] {len(lines)} line(s) @ {size}px · {position} · "
+          f"{width}x{height} · outline {stroke}px · {Path(font_path).name}")
     return layer
 
 
@@ -136,7 +158,8 @@ def _blur_sigma(strength: int, width: int, height: int) -> Optional[float]:
 
 
 def _overlay_image(data: bytes, text: str, text_size: int, position: str,
-                   blur: int, color: str) -> bytes:
+                   blur: int, color: str, outline_color: str,
+                   outline_width: int) -> bytes:
     from PIL import Image, ImageFilter
 
     png = to_png_bytes(data)
@@ -145,7 +168,8 @@ def _overlay_image(data: bytes, text: str, text_size: int, position: str,
     if sigma:
         base = base.filter(ImageFilter.GaussianBlur(radius=sigma))
 
-    layer = _render_text_layer(text, base.width, base.height, text_size, position, color)
+    layer = _render_text_layer(text, base.width, base.height, text_size, position,
+                               color, outline_color, outline_width)
     out = Image.alpha_composite(base, layer)
 
     buf = io.BytesIO()
@@ -154,7 +178,8 @@ def _overlay_image(data: bytes, text: str, text_size: int, position: str,
 
 
 def _overlay_video(data: bytes, text: str, text_size: int, position: str,
-                   blur: int, color: str) -> bytes:
+                   blur: int, color: str, outline_color: str,
+                   outline_width: int) -> bytes:
     with tempfile.TemporaryDirectory(prefix="text_overlay_") as tmp:
         work_dir = Path(tmp)
         src = work_dir / "input.mp4"
@@ -168,7 +193,8 @@ def _overlay_video(data: bytes, text: str, text_size: int, position: str,
             )
 
         layer_path = work_dir / "overlay.png"
-        _render_text_layer(text, width, height, text_size, position, color).save(layer_path)
+        _render_text_layer(text, width, height, text_size, position, color,
+                           outline_color, outline_width).save(layer_path)
 
         sigma = _blur_sigma(blur, width, height)
         if sigma:
@@ -198,7 +224,9 @@ def apply_text_overlay(
     text_size: int = 9,
     position: str = "center",
     blur: int = 0,
-    color: str = "#ffffff",
+    color: str = DEFAULT_COLOR,
+    outline_color: str = DEFAULT_OUTLINE_COLOR,
+    outline_width: int = DEFAULT_OUTLINE_WIDTH,
 ) -> bytes:
     """
     Return `data` with `text` burned in. Video in, video out; image in, image
@@ -212,11 +240,15 @@ def apply_text_overlay(
         )
     if position not in POSITIONS:
         position = "center"
-    color = (color or "").strip() or "#ffffff"
+    color = (color or "").strip() or DEFAULT_COLOR
+    outline_color = (outline_color or "").strip() or DEFAULT_OUTLINE_COLOR
+    outline_width = DEFAULT_OUTLINE_WIDTH if outline_width is None else int(outline_width)
 
     kind = sniff_media_kind(data)
     if kind == "video":
-        return _overlay_video(data, text, text_size, position, blur, color)
+        return _overlay_video(data, text, text_size, position, blur, color,
+                              outline_color, outline_width)
     if kind in ("image", "svg"):
-        return _overlay_image(data, text, text_size, position, blur, color)
+        return _overlay_image(data, text, text_size, position, blur, color,
+                              outline_color, outline_width)
     raise ValueError(f"The text overlay step needs an image or video input, got {kind}.")
