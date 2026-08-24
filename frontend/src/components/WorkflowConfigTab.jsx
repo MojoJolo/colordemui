@@ -23,6 +23,8 @@ const DEFAULT_STEP = () => ({
   overlay_position: "center",
   overlay_blur: 0,
   overlay_color: "#ffffff",
+  overlay_outline_color: "#000000",
+  overlay_outline_width: 100,
 });
 
 // Fill in fields missing from workflows saved before they existed
@@ -43,6 +45,8 @@ function normalizeStep(s) {
     overlay_position: s.overlay_position || "center",
     overlay_blur: s.overlay_blur ?? 0,
     overlay_color: s.overlay_color || "#ffffff",
+    overlay_outline_color: s.overlay_outline_color || "#000000",
+    overlay_outline_width: s.overlay_outline_width ?? 100,
   };
 }
 
@@ -445,6 +449,8 @@ export default function WorkflowConfigTab({ onExpand }) {
           overlay_position: s.overlay_position || "center",
           overlay_blur: s.overlay_blur ?? 0,
           overlay_color: s.overlay_color || "#ffffff",
+          overlay_outline_color: s.overlay_outline_color || "#000000",
+          overlay_outline_width: s.overlay_outline_width ?? 100,
         })),
         slot_lists: draft.slot_lists,
         schedule_value: draft.schedule_value,
@@ -948,6 +954,35 @@ export default function WorkflowConfigTab({ onExpand }) {
                               className="klein-input wf-color-input"
                               value={step.overlay_color || "#ffffff"}
                               onChange={(e) => updateStep(i, "overlay_color", e.target.value)}
+                            />
+                          </div>
+                        )}
+                        {showOverlay && (
+                          <div className="wf-field wf-field-color">
+                            <label className="prompt-label">Outline colour</label>
+                            <input
+                              type="color"
+                              className="klein-input wf-color-input"
+                              value={step.overlay_outline_color || "#000000"}
+                              onChange={(e) => updateStep(i, "overlay_outline_color", e.target.value)}
+                            />
+                          </div>
+                        )}
+                        {showOverlay && (
+                          <div className="wf-field">
+                            <label className="prompt-label">
+                              Outline: {(step.overlay_outline_width ?? 100) === 0
+                                ? "none"
+                                : `${step.overlay_outline_width ?? 100}%`}
+                            </label>
+                            <input
+                              type="range"
+                              min={0}
+                              max={300}
+                              step={25}
+                              value={step.overlay_outline_width ?? 100}
+                              onChange={(e) => updateStep(i, "overlay_outline_width", parseInt(e.target.value))}
+                              className="wf-duration-slider"
                             />
                           </div>
                         )}

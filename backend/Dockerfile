@@ -7,6 +7,7 @@ ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    fonts-liberation \
     fonts-dejavu-core \
     libcairo2 \
     libgdk-pixbuf-2.0-0 \

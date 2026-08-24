@@ -20,17 +20,30 @@ _AUDIO_STREAM_RE = re.compile(r"Stream #\d+:\d+.*?: Audio: (\w+)")
 _FPS_RE = re.compile(r", ([\d.]+) fps,")
 _SAMPLE_RATE_RE = re.compile(r": Audio:.*?, (\d+) Hz")
 
-# Searched in order; the first one that exists wins. Debian's fonts-dejavu-core
-# provides the first entry, which is what the backend image installs.
+# Searched in order; the first one that exists wins. Arial is the target face —
+# Liberation Sans and Arimo are metric-compatible clones of it and are what
+# Linux boxes actually ship, so they come before the DejaVu fallback. Debian's
+# fonts-liberation provides the first Linux entry, which the backend installs.
 _FONT_CANDIDATES = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "/Library/Fonts/Arial.ttf",
+    # Real Arial, where the OS has it
     "C:/Windows/Fonts/arialbd.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/Library/Fonts/Arial Bold.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
+    # Arial-metric clones
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/croscore/Arimo-Bold.ttf",
+    "/usr/share/fonts/truetype/crosextra/Carlito-Bold.ttf",
+    # Generic sans fallbacks
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
+
+# Family names preferred by the last-resort filesystem scan, best first.
+_FONT_FAMILY_PREFERENCE = ("arial", "liberationsans", "arimo", "helvetica", "carlito", "dejavusans")
 
 
 def ffmpeg_binary() -> str:
@@ -163,10 +176,26 @@ def even(n: int) -> int:
     return n if n % 2 == 0 else n + 1
 
 
+def _font_rank(path: Path) -> tuple:
+    """Sort key for the fallback scan: preferred family first, then bold faces."""
+    name = path.name.lower().replace("-", "").replace("_", "").replace(" ", "")
+    family = len(_FONT_FAMILY_PREFERENCE)
+    for i, candidate in enumerate(_FONT_FAMILY_PREFERENCE):
+        if name.startswith(candidate):
+            family = i
+            break
+    is_bold = 0 if "bold" in name else 1
+    # Italic / oblique faces read poorly as a caption, so push them to the back.
+    is_slanted = 1 if ("italic" in name or "oblique" in name) else 0
+    return (family, is_slanted, is_bold, str(path))
+
+
 def find_font() -> str:
     """
-    Locate a TrueType font for drawtext. TEXT_OVERLAY_FONT overrides the search
-    when a specific face is wanted.
+    Locate a TrueType font for the caption. Arial (or an Arial-metric clone such
+    as Liberation Sans) is preferred — it is the most readable of the faces that
+    are reliably installed. TEXT_OVERLAY_FONT overrides the search when a
+    specific face is wanted.
     """
     override = os.environ.get("TEXT_OVERLAY_FONT")
     if override and Path(override).exists():
@@ -180,16 +209,12 @@ def find_font() -> str:
         base = Path(root)
         if not base.exists():
             continue
-        # Prefer a bold face — big overlay text reads better with heavier strokes
         fonts = sorted(base.rglob("*.ttf")) + sorted(base.rglob("*.otf"))
-        bold = [f for f in fonts if "bold" in f.name.lower()]
-        if bold:
-            return str(bold[0])
         if fonts:
-            return str(fonts[0])
+            return str(min(fonts, key=_font_rank))
 
     raise RuntimeError(
         "No TrueType font found for the text overlay. Install one "
-        "(e.g. 'apt-get install fonts-dejavu-core') or set TEXT_OVERLAY_FONT "
+        "(e.g. 'apt-get install fonts-liberation') or set TEXT_OVERLAY_FONT "
         "to a .ttf path."
     )

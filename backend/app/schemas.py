@@ -76,6 +76,8 @@ class WorkflowStepRequest(BaseModel):
     overlay_position: str = "center"
     overlay_blur: int = 0
     overlay_color: str = "#ffffff"
+    overlay_outline_color: str = "#000000"
+    overlay_outline_width: int = 100
 
 
 class WorkflowRequest(BaseModel):
@@ -106,6 +108,8 @@ class WorkflowStepResponse(BaseModel):
     overlay_position: str = "center"
     overlay_blur: int = 0
     overlay_color: str = "#ffffff"
+    overlay_outline_color: str = "#000000"
+    overlay_outline_width: int = 100
 
 
 class WorkflowResponse(BaseModel):
