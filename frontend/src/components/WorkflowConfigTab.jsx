@@ -54,10 +54,10 @@ function normalizeStep(s) {
 // ridge" (the "s" in "6s |" is optional). Anything after the pipe is the prompt.
 const BULK_DURATION_RE = /^(\d{1,3})\s*s?\s*\|\s*(.*)$/i;
 
-// A line of three or more dashes and nothing else divides one bulk prompt from
-// the next. Shot prompts run to several paragraphs with blank lines inside
-// them, so neither a line break nor a blank line can mark where one ends.
-const BULK_SEPARATOR_RE = /^\s*-{3,}\s*$/;
+// What divides one bulk prompt from the next, matching the generate forms.
+// A shot prompt runs to several paragraphs with blank lines inside it, so
+// neither a line break nor a blank line can mark where one ends.
+const BULK_SEPARATOR = "=====";
 
 // How many unpicked images the reference picker shows before "Show older".
 const REF_PICKER_LIMIT = 20;
@@ -226,35 +226,6 @@ export default function WorkflowConfigTab({ onExpand }) {
   }
 
   /**
-   * Cut the pasted text into one chunk per step.
-   *
-   * A "---" line divides them when the text has one, because a shot prompt
-   * runs to several paragraphs — a scene header, a character description each,
-   * a beat per timestamp — and the blank lines between those paragraphs are
-   * part of the prompt, not a boundary. Text with no separator keeps the
-   * one-per-line rule the generate tab has always used, which is all a short
-   * prompt needs.
-   */
-  function splitBulkBlocks(text) {
-    const rows = text.split("\n");
-    const separated = rows.some((row) => BULK_SEPARATOR_RE.test(row));
-    if (!separated) return { separated, blocks: rows };
-
-    const blocks = [];
-    let current = [];
-    for (const row of rows) {
-      if (BULK_SEPARATOR_RE.test(row)) {
-        blocks.push(current.join("\n"));
-        current = [];
-      } else {
-        current.push(row);
-      }
-    }
-    blocks.push(current.join("\n"));
-    return { separated, blocks };
-  }
-
-  /**
    * Turn the pasted text into the steps it describes, dropping empty chunks.
    *
    * A chunk starting "6 | a hiker on the ridge" makes a 6-second step and keeps
@@ -265,9 +236,8 @@ export default function WorkflowConfigTab({ onExpand }) {
    * dropped, since the model would have quietly shortened them anyway.
    */
   function parseBulkBlocks(text, bounds) {
-    const { separated, blocks } = splitBulkBlocks(text);
     const lines = [];
-    for (const block of blocks) {
+    for (const block of text.split(BULK_SEPARATOR)) {
       const body = block.trim();
       if (!body) continue;
       const breakAt = body.indexOf("\n");
@@ -284,7 +254,7 @@ export default function WorkflowConfigTab({ onExpand }) {
       const duration = Math.min(bounds.max, Math.max(bounds.min, asked));
       lines.push({ prompt, duration, asked, clamped: duration !== asked });
     }
-    return { separated, lines };
+    return lines;
   }
 
   /**
@@ -700,7 +670,7 @@ export default function WorkflowConfigTab({ onExpand }) {
   const bulkTemplateModel = draft ? draft.steps[bulkTemplate].model : null;
   const bulkTimed = !!models.find((m) => m.id === bulkTemplateModel)?.supports_duration;
   const bulkRange = bulkTimed ? durationBounds(bulkTemplateModel) : null;
-  const { separated: bulkSeparated, lines: bulkLines } = parseBulkBlocks(bulkText, bulkRange);
+  const bulkLines = parseBulkBlocks(bulkText, bulkRange);
   // What the batch would add up to, so a minute of video can be planned in the
   // box rather than counted afterwards.
   const bulkSeconds = bulkTimed
@@ -868,8 +838,8 @@ export default function WorkflowConfigTab({ onExpand }) {
                 <p className="wf-hint">
                   Each prompt becomes its own step, copying Step {bulkTemplate + 1}'s model,
                   outputs, ratio and resolution. Set that step up the way you want the batch,
-                  then paste the prompts here. Separate them with a <code>---</code> line —
-                  without one, every line is read as its own prompt.
+                  then paste the prompts here, separated by <code>=====</code> as on the
+                  generate tabs.
                   {bulkTimed && (
                     <>
                       {" "}Start a prompt with <code>6 |</code> to give that shot its own
@@ -892,17 +862,13 @@ export default function WorkflowConfigTab({ onExpand }) {
                   value={bulkText}
                   onChange={(e) => setBulkText(e.target.value)}
                   placeholder={bulkTimed
-                    ? "6 | a lone hiker steps onto the ridge at dawn\n\nHe wears a red shell jacket and a heavy pack.\n---\n4 | the camera pulls back over the valley\n---\nclouds roll in across the peaks"
-                    : "a lone hiker steps onto the ridge at dawn\n---\nthe camera pulls back over the valley\n---\nclouds roll in across the peaks"}
+                    ? "6 | a lone hiker steps onto the ridge at dawn\n\nHe wears a red shell jacket and a heavy pack.\n\n=====\n\n4 | the camera pulls back over the valley\n\n=====\n\nclouds roll in across the peaks"
+                    : "a lone hiker steps onto the ridge at dawn\n\n=====\n\nthe camera pulls back over the valley\n\n=====\n\nclouds roll in across the peaks"}
                   rows={10}
                 />
                 {bulkLines.length > 0 && (
                   <>
-                    <p className="wf-hint">
-                      {bulkSeparated
-                        ? "Split on --- separators:"
-                        : "No --- separator found, so each line is its own step:"}
-                    </p>
+                    <p className="wf-hint">Steps this would add:</p>
                     <ol className="wf-bulk-preview">
                       {bulkLines.map((line, k) => (
                         <li key={k} className="wf-bulk-preview-item">
