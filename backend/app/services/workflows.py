@@ -199,6 +199,7 @@ def _build_step(s) -> WorkflowStep:
         initial_image_ids=getattr(s, "initial_image_ids", []),
         source_step_index=getattr(s, "source_step_index", None),
         chain_last_frame=getattr(s, "chain_last_frame", False),
+        from_bulk=getattr(s, "from_bulk", False),
         merge_source_steps=getattr(s, "merge_source_steps", []),
         merge_items=getattr(s, "merge_items", []),
         language=getattr(s, "language", "english"),

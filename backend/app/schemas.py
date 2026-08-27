@@ -69,6 +69,7 @@ class WorkflowStepRequest(BaseModel):
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
     chain_last_frame: bool = False
+    from_bulk: bool = False
     merge_source_steps: List[int] = []
     merge_items: List[MergeItem] = []
     language: str = "english"
@@ -102,6 +103,7 @@ class WorkflowStepResponse(BaseModel):
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
     chain_last_frame: bool = False
+    from_bulk: bool = False
     merge_source_steps: List[int] = []
     merge_items: List[MergeItem] = []
     language: str = "english"

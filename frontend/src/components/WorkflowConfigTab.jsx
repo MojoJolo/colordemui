@@ -15,7 +15,10 @@ const DEFAULT_STEP = () => ({
   save_audio: true,
   initial_image_ids: [],
   source_step_index: null,
-  chain_last_frame: false,
+  // On by default: a step placed after a video step is nearly always the next
+  // shot of the same scene, and an unchained one opens on nothing.
+  chain_last_frame: true,
+  from_bulk: false,
   merge_source_steps: [],
   merge_items: [],
   language: "english",
@@ -39,6 +42,7 @@ function normalizeStep(s) {
     initial_image_ids: s.initial_image_ids || [],
     source_step_index: s.source_step_index ?? null,
     chain_last_frame: s.chain_last_frame ?? false,
+    from_bulk: s.from_bulk ?? false,
     merge_source_steps: s.merge_source_steps || [],
     merge_items: s.merge_items || [],
     language: s.language || "english",
@@ -261,10 +265,13 @@ export default function WorkflowConfigTab({ onExpand }) {
 
   /**
    * A copy of `template` carrying one pasted prompt. Everything else about the
-   * step comes along — model, outputs, duration, ratio, resolution, overlay —
-   * so twelve shots of the same video share one configuration. The merge picks
-   * are the exception: they name specific earlier steps, and repeating them
-   * across a dozen copies would merge the same clips a dozen times.
+   * step comes along — model, outputs, duration, ratio, resolution, chaining —
+   * so twelve shots of the same video share one configuration.
+   *
+   * The two things left behind both name specific earlier steps by position:
+   * merge picks, which would merge the same clips once per copy, and an
+   * explicit source step, which would point every shot at one frame instead of
+   * at the shot before it.
    */
   function stepFromTemplate(template, line) {
     return {
@@ -272,21 +279,72 @@ export default function WorkflowConfigTab({ onExpand }) {
       step_id: null,
       prompt_template: line.prompt,
       duration: line.duration ?? template.duration,
+      source_step_index: null,
       merge_source_steps: [],
       merge_items: [],
+      from_bulk: true,
     };
   }
 
-  // Adds the lines the panel is previewing, so what lands matches what it says.
+  /**
+   * Where a new batch belongs: where the last one sat, so a merger that closed
+   * the workflow still closes it. With no previous batch the steps go at the
+   * end, but still ahead of any merger already waiting there.
+   */
+  function bulkInsertIndex(steps) {
+    const firstBulk = steps.findIndex((s) => s.from_bulk);
+    if (firstBulk !== -1) return firstBulk;
+    let at = steps.length;
+    while (at > 0 && isMergerStep(steps[at - 1])) at -= 1;
+    return at;
+  }
+
+  function isMergerStep(step) {
+    const info = step && models.find((m) => m.id === step.model);
+    return !!info && !!info.is_merger;
+  }
+
+  /**
+   * Replace the last batch with this one.
+   *
+   * Pasting again means "these shots instead", not "these shots as well", so
+   * the steps the previous Bulk Add created make way. Everything else stays
+   * put — the merger at the end, an upload feeding the first shot, anything
+   * hand-built. Steps are referred to by position, so the ones that survive
+   * have their references renumbered; a reference to a replaced step has
+   * nothing left to point at and is dropped, which returns a merger to its
+   * default of joining every video step before it.
+   */
   function bulkAddSteps(lines, templateIdx) {
     if (lines.length === 0) return;
     setDraft((d) => {
       const added = lines.map((line) => stepFromTemplate(d.steps[templateIdx], line));
+
       // A lone untouched step is the placeholder every new workflow starts
       // with. Keeping it would leave an empty prompt to delete by hand, so the
       // pasted steps take its place instead of queueing up behind it.
-      const replaceBlank = d.steps.length === 1 && !d.steps[0].prompt_template.trim();
-      return { ...d, steps: replaceBlank ? added : [...d.steps, ...added] };
+      if (d.steps.length === 1 && !d.steps[0].prompt_template.trim()) {
+        return { ...d, steps: added };
+      }
+
+      const insertAt = bulkInsertIndex(d.steps);
+      const kept = [];
+      const moved = new Map();
+      d.steps.forEach((step, i) => {
+        if (step.from_bulk) return;
+        moved.set(i, kept.length);
+        kept.push(step);
+      });
+      // Everything from the insertion point on is pushed back by the new steps
+      for (const [before, after] of moved) {
+        if (after >= insertAt) moved.set(before, after + added.length);
+      }
+
+      const steps = remapStepRefs(
+        [...kept.slice(0, insertAt), ...added, ...kept.slice(insertAt)],
+        (i) => (moved.has(i) ? moved.get(i) : null)
+      );
+      return { ...d, steps };
     });
     resetBulkAdd();
   }
@@ -537,6 +595,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           initial_image_ids: s.initial_image_ids || [],
           source_step_index: s.source_step_index ?? null,
           chain_last_frame: s.chain_last_frame ?? false,
+          from_bulk: s.from_bulk ?? false,
           merge_source_steps: s.merge_source_steps || [],
           merge_items: s.merge_items || [],
           language: s.language || "english",
@@ -663,14 +722,26 @@ export default function WorkflowConfigTab({ onExpand }) {
 
   const missingSlots = draft ? getMissingSlots() : [];
 
+  // Steps worth copying a batch of prompts from. A merger joins clips and an
+  // upload holds files; neither takes a prompt, so neither can stand in for a
+  // shot — and once a merger closes the workflow it would otherwise be the
+  // default, turning a batch of shots into a batch of mergers.
+  const bulkCandidates = draft
+    ? draft.steps.map((_, i) => i).filter((i) => {
+        const info = models.find((m) => m.id === draft.steps[i].model);
+        return !info || (!info.is_merger && !info.is_upload);
+      })
+    : [];
   // Which step the pasted prompts copy their settings from: the explicit pick
-  // while it still exists, otherwise the last one — the step just configured.
-  const bulkTemplate = draft
-    ? (bulkTemplateIdx != null && bulkTemplateIdx < draft.steps.length
-        ? bulkTemplateIdx
-        : draft.steps.length - 1)
-    : 0;
-  const bulkTemplateModel = draft ? draft.steps[bulkTemplate].model : null;
+  // while it stands, else the batch being replaced, else the last step that
+  // could be a shot.
+  const bulkTemplate = (() => {
+    if (bulkCandidates.length === 0) return null;
+    if (bulkTemplateIdx != null && bulkCandidates.includes(bulkTemplateIdx)) return bulkTemplateIdx;
+    const lastOfBatch = [...bulkCandidates].reverse().find((i) => draft.steps[i].from_bulk);
+    return lastOfBatch ?? bulkCandidates[bulkCandidates.length - 1];
+  })();
+  const bulkTemplateModel = bulkTemplate != null ? draft.steps[bulkTemplate].model : null;
   const bulkTimed = !!models.find((m) => m.id === bulkTemplateModel)?.supports_duration;
   const bulkRange = bulkTimed ? durationBounds(bulkTemplateModel) : null;
   const bulkLines = parseBulkBlocks(bulkText, bulkRange);
@@ -679,7 +750,10 @@ export default function WorkflowConfigTab({ onExpand }) {
   const bulkSeconds = bulkTimed
     ? bulkLines.reduce((acc, l) => acc + (l.duration ?? draft.steps[bulkTemplate].duration ?? 0), 0)
     : 0;
+  const bulkTemplateDuration = bulkTemplate != null ? draft.steps[bulkTemplate].duration : 0;
   const bulkClamped = bulkLines.filter((l) => l.clamped);
+  // Steps the last batch left behind, which this one replaces
+  const bulkReplacing = draft ? draft.steps.filter((s) => s.from_bulk).length : 0;
 
   // ---- Render ----
 
@@ -819,7 +893,16 @@ export default function WorkflowConfigTab({ onExpand }) {
               </button>
             </div>
 
-            {bulkOpen && (
+            {bulkOpen && bulkTemplate == null && (
+              <div className="wf-bulk-panel">
+                <div className="wf-warning">
+                  No step here can stand in for a shot — a merge or upload step takes no
+                  prompt. Add a step that generates something, set it up, then paste.
+                </div>
+              </div>
+            )}
+
+            {bulkOpen && bulkTemplate != null && (
               <div className="wf-bulk-panel">
                 <div className="wf-bulk-head">
                   <label className="prompt-label" htmlFor="wf-bulk-template">
@@ -831,9 +914,9 @@ export default function WorkflowConfigTab({ onExpand }) {
                     value={bulkTemplate}
                     onChange={(e) => setBulkTemplateIdx(parseInt(e.target.value))}
                   >
-                    {draft.steps.map((s, si) => (
+                    {bulkCandidates.map((si) => (
                       <option key={si} value={si}>
-                        Step {si + 1} · {s.model}
+                        Step {si + 1} · {draft.steps[si].model}
                       </option>
                     ))}
                   </select>
@@ -843,10 +926,17 @@ export default function WorkflowConfigTab({ onExpand }) {
                   outputs, ratio and resolution. Set that step up the way you want the batch,
                   then paste the prompts here, separated by <code>=====</code> as on the
                   generate tabs.
+                  {bulkReplacing > 0 && (
+                    <>
+                      {" "}This replaces the {bulkReplacing} step
+                      {bulkReplacing !== 1 ? "s" : ""} the last Bulk Add created — every other
+                      step keeps its place, including a merge step at the end.
+                    </>
+                  )}
                   {bulkTimed && (
                     <>
                       {" "}Start a prompt with <code>6 |</code> to give that shot its own
-                      length; prompts without one run for {draft.steps[bulkTemplate].duration}s.
+                      length; prompts without one run for {bulkTemplateDuration}s.
                     </>
                   )}
                 </p>
@@ -877,7 +967,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                         <li key={k} className="wf-bulk-preview-item">
                           {bulkTimed && (
                             <span className="wf-bulk-preview-dur">
-                              {line.duration ?? draft.steps[bulkTemplate].duration}s
+                              {line.duration ?? bulkTemplateDuration}s
                             </span>
                           )}
                           <span className="wf-bulk-preview-text">
@@ -904,9 +994,11 @@ export default function WorkflowConfigTab({ onExpand }) {
                     onClick={() => bulkAddSteps(bulkLines, bulkTemplate)}
                     disabled={bulkLines.length === 0}
                   >
-                    {bulkLines.length > 0
-                      ? `Add ${bulkLines.length} Step${bulkLines.length !== 1 ? "s" : ""}`
-                      : "Add Steps"}
+                    {bulkLines.length === 0
+                      ? "Add Steps"
+                      : bulkReplacing > 0
+                      ? `Replace with ${bulkLines.length} Step${bulkLines.length !== 1 ? "s" : ""}`
+                      : `Add ${bulkLines.length} Step${bulkLines.length !== 1 ? "s" : ""}`}
                   </button>
                   <button
                     type="button"
