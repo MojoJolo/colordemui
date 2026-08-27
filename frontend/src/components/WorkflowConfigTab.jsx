@@ -50,6 +50,10 @@ function normalizeStep(s) {
   };
 }
 
+// A bulk line may lead with the clip length it wants: "6 | a hiker on the ridge"
+// (the "s" in "6s |" is optional). Anything after the pipe is the prompt.
+const BULK_DURATION_RE = /^(\d{1,3})\s*s?\s*\|\s*(.*)$/i;
+
 // How many unpicked images the reference picker shows before "Show older".
 const REF_PICKER_LIMIT = 20;
 
@@ -209,9 +213,41 @@ export default function WorkflowConfigTab({ onExpand }) {
     setDraft((d) => ({ ...d, steps: [...d.steps, DEFAULT_STEP()] }));
   }
 
-  // One prompt per line, blank lines dropped — same rule as the generate tab.
-  function splitBulkPrompts(text) {
-    return text.split("\n").map((l) => l.trim()).filter(Boolean);
+  // The duration range a model actually honours; the defaults match the slider
+  // for models that never declared one.
+  function durationBounds(modelId) {
+    const info = models.find((m) => m.id === modelId);
+    return { min: info?.min_duration ?? 1, max: info?.max_duration ?? 30 };
+  }
+
+  /**
+   * One step per line, blank lines dropped — the same rule as the generate tab,
+   * plus an optional leading duration.
+   *
+   * A line reading "6 | a hiker on the ridge" makes a 6-second step and keeps
+   * the pipe out of the prompt; a line without one inherits the template's
+   * duration. The prefix is only read when the model takes a duration at all,
+   * so a pipe in an image prompt stays part of the text. Out-of-range values
+   * are clamped and flagged rather than dropped, since the model would have
+   * quietly shortened them anyway.
+   */
+  function parseBulkLines(text, bounds) {
+    const lines = [];
+    for (const raw of text.split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      const m = bounds ? BULK_DURATION_RE.exec(line) : null;
+      const prompt = m ? m[2].trim() : line;
+      if (!prompt) continue;
+      if (!m) {
+        lines.push({ prompt, duration: null, asked: null, clamped: false });
+        continue;
+      }
+      const asked = parseInt(m[1], 10);
+      const duration = Math.min(bounds.max, Math.max(bounds.min, asked));
+      lines.push({ prompt, duration, asked, clamped: duration !== asked });
+    }
+    return lines;
   }
 
   /**
@@ -221,24 +257,22 @@ export default function WorkflowConfigTab({ onExpand }) {
    * are the exception: they name specific earlier steps, and repeating them
    * across a dozen copies would merge the same clips a dozen times.
    */
-  function stepFromTemplate(template, prompt) {
+  function stepFromTemplate(template, line) {
     return {
       ...template,
       step_id: null,
-      prompt_template: prompt,
+      prompt_template: line.prompt,
+      duration: line.duration ?? template.duration,
       merge_source_steps: [],
       merge_items: [],
     };
   }
 
-  function bulkAddSteps() {
-    const prompts = splitBulkPrompts(bulkText);
-    if (prompts.length === 0) return;
+  // Adds the lines the panel is previewing, so what lands matches what it says.
+  function bulkAddSteps(lines, templateIdx) {
+    if (lines.length === 0) return;
     setDraft((d) => {
-      const tmplIdx = bulkTemplateIdx != null && bulkTemplateIdx < d.steps.length
-        ? bulkTemplateIdx
-        : d.steps.length - 1;
-      const added = prompts.map((p) => stepFromTemplate(d.steps[tmplIdx], p));
+      const added = lines.map((line) => stepFromTemplate(d.steps[templateIdx], line));
       // A lone untouched step is the placeholder every new workflow starts
       // with. Keeping it would leave an empty prompt to delete by hand, so the
       // pasted steps take its place instead of queueing up behind it.
@@ -619,7 +653,6 @@ export default function WorkflowConfigTab({ onExpand }) {
 
   const missingSlots = draft ? getMissingSlots() : [];
 
-  const bulkPrompts = splitBulkPrompts(bulkText);
   // Which step the pasted prompts copy their settings from: the explicit pick
   // while it still exists, otherwise the last one — the step just configured.
   const bulkTemplate = draft
@@ -627,6 +660,16 @@ export default function WorkflowConfigTab({ onExpand }) {
         ? bulkTemplateIdx
         : draft.steps.length - 1)
     : 0;
+  const bulkTemplateModel = draft ? draft.steps[bulkTemplate].model : null;
+  const bulkTimed = !!models.find((m) => m.id === bulkTemplateModel)?.supports_duration;
+  const bulkRange = bulkTimed ? durationBounds(bulkTemplateModel) : null;
+  const bulkLines = parseBulkLines(bulkText, bulkRange);
+  // What the batch would add up to, so a minute of video can be planned in the
+  // box rather than counted afterwards.
+  const bulkSeconds = bulkTimed
+    ? bulkLines.reduce((acc, l) => acc + (l.duration ?? draft.steps[bulkTemplate].duration ?? 0), 0)
+    : 0;
+  const bulkClamped = bulkLines.filter((l) => l.clamped);
 
   // ---- Render ----
 
@@ -787,14 +830,21 @@ export default function WorkflowConfigTab({ onExpand }) {
                 </div>
                 <p className="wf-hint">
                   Each line becomes its own step, copying Step {bulkTemplate + 1}'s model,
-                  outputs, duration, ratio and resolution. Set that step up the way you want
-                  the batch, then paste the prompts here.
+                  outputs, ratio and resolution. Set that step up the way you want the batch,
+                  then paste the prompts here.
+                  {bulkTimed && (
+                    <>
+                      {" "}Lead a line with <code>6 |</code> to give that shot its own length;
+                      lines without one run for {draft.steps[bulkTemplate].duration}s.
+                    </>
+                  )}
                 </p>
                 <label className="prompt-label" htmlFor="wf-bulk-prompts">
                   Prompts{" "}
                   <span className="prompt-count">
-                    {bulkPrompts.length > 0
-                      ? `(${bulkPrompts.length} step${bulkPrompts.length !== 1 ? "s" : ""})`
+                    {bulkLines.length > 0
+                      ? `(${bulkLines.length} step${bulkLines.length !== 1 ? "s" : ""}` +
+                        (bulkTimed ? ` · ${bulkSeconds}s total)` : ")")
                       : ""}
                   </span>
                 </label>
@@ -803,18 +853,28 @@ export default function WorkflowConfigTab({ onExpand }) {
                   className="prompt-textarea wf-bulk-textarea"
                   value={bulkText}
                   onChange={(e) => setBulkText(e.target.value)}
-                  placeholder="a lone hiker steps onto the ridge at dawn&#10;the camera pulls back over the valley&#10;clouds roll in across the peaks"
+                  placeholder={bulkTimed
+                    ? "6 | a lone hiker steps onto the ridge at dawn\n4 | the camera pulls back over the valley\nclouds roll in across the peaks"
+                    : "a lone hiker steps onto the ridge at dawn\nthe camera pulls back over the valley\nclouds roll in across the peaks"}
                   rows={8}
                 />
+                {bulkClamped.length > 0 && (
+                  <div className="wf-warning">
+                    {bulkTemplateModel} runs {bulkRange.min}–{bulkRange.max}s.{" "}
+                    {bulkClamped.length} line{bulkClamped.length !== 1 ? "s" : ""}{" "}
+                    {bulkClamped.length === 1 ? "falls" : "fall"} outside that:{" "}
+                    {bulkClamped.map((l) => `${l.asked}s → ${l.duration}s`).join(", ")}.
+                  </div>
+                )}
                 <div className="wf-bulk-actions">
                   <button
                     type="button"
                     className="btn btn-primary wf-btn-sm"
-                    onClick={bulkAddSteps}
-                    disabled={bulkPrompts.length === 0}
+                    onClick={() => bulkAddSteps(bulkLines, bulkTemplate)}
+                    disabled={bulkLines.length === 0}
                   >
-                    {bulkPrompts.length > 0
-                      ? `Add ${bulkPrompts.length} Step${bulkPrompts.length !== 1 ? "s" : ""}`
+                    {bulkLines.length > 0
+                      ? `Add ${bulkLines.length} Step${bulkLines.length !== 1 ? "s" : ""}`
                       : "Add Steps"}
                   </button>
                   <button
@@ -849,6 +909,12 @@ export default function WorkflowConfigTab({ onExpand }) {
                   && !modelInfo.accepts_image && !modelInfo.is_multi_reference;
                 const showAspectRatio = modelInfo && modelInfo.supports_aspect_ratio && !isUpload;
                 const showDuration = modelInfo && modelInfo.supports_duration;
+                const durMin = modelInfo?.min_duration ?? 1;
+                const durMax = modelInfo?.max_duration ?? 30;
+                // A step configured before the model declared its range, or
+                // carried over from a longer-clip model, still holds a value
+                // the request would silently shorten.
+                const durOverMax = showDuration && (step.duration ?? 5) > durMax;
                 const showResolution = modelInfo && modelInfo.supports_resolution;
                 const showRefPicker = modelInfo
                   && (modelInfo.is_multi_reference || modelInfo.is_text
@@ -981,12 +1047,17 @@ export default function WorkflowConfigTab({ onExpand }) {
                             <label className="prompt-label">Duration: {step.duration ?? 5}s</label>
                             <input
                               type="range"
-                              min={1}
-                              max={30}
-                              value={step.duration ?? 5}
+                              min={durMin}
+                              max={durMax}
+                              value={Math.min(durMax, Math.max(durMin, step.duration ?? 5))}
                               onChange={(e) => updateStep(i, "duration", parseInt(e.target.value))}
                               className="wf-duration-slider"
                             />
+                            {durOverMax && (
+                              <p className="wf-hint wf-hint-warn">
+                                {step.model} caps at {durMax}s — this clip will be {durMax}s.
+                              </p>
+                            )}
                           </div>
                         )}
                         {showDuration && (

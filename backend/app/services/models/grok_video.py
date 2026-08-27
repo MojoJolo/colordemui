@@ -5,6 +5,9 @@ from typing import Optional
 from app.services.models.base import ImageModel, is_video_bytes as _is_video
 
 
+MAX_DURATION = 8
+
+
 class GrokVideoModel(ImageModel):
     """
     Text-to-video (and optional image-to-video) via xai/grok-imagine-video.
@@ -27,6 +30,10 @@ class GrokVideoModel(ImageModel):
     def supports_duration(self) -> bool:
         return True
 
+    @property
+    def max_duration(self) -> int:
+        return MAX_DURATION
+
     def generate(
         self,
         prompt: str,
@@ -44,7 +51,7 @@ class GrokVideoModel(ImageModel):
 
         payload = {
             "prompt": prompt,
-            "duration": min(duration, 8),
+            "duration": min(duration, MAX_DURATION),
             "aspect_ratio": aspect_ratio,
         }
         if image_bytes is not None:
@@ -58,7 +65,7 @@ class GrokVideoModel(ImageModel):
                 payload["image"] = buf
 
         input_info = f"<video {len(image_bytes)} bytes>" if image_bytes is not None and _is_video(image_bytes) else (f"<image {len(image_bytes)} bytes>" if image_bytes is not None else "none")
-        print(f"[grok-video] request: prompt={prompt!r} input={input_info} duration={min(duration, 8)}s aspect={aspect_ratio}")
+        print(f"[grok-video] request: prompt={prompt!r} input={input_info} duration={min(duration, MAX_DURATION)}s aspect={aspect_ratio}")
 
         # Grok rejects Replicate Files API URLs regardless of MIME type —
         # pass all files inline as base64 data URIs to bypass file storage entirely.

@@ -65,6 +65,8 @@ def list_models() -> List[dict]:
             "is_upload": model.is_upload,
             "supports_aspect_ratio": model.supports_aspect_ratio,
             "supports_duration": model.supports_duration,
+            "min_duration": model.min_duration,
+            "max_duration": model.max_duration,
             "supports_captions": model.supports_captions,
             "supports_text_overlay": model.supports_text_overlay,
             "supports_resolution": model.supports_resolution,

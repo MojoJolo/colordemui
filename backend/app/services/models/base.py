@@ -267,6 +267,20 @@ class ImageModel(ABC):
         return False
 
     @property
+    def min_duration(self) -> int:
+        """Shortest clip this model will produce, in seconds."""
+        return 1
+
+    @property
+    def max_duration(self) -> int:
+        """
+        Longest clip this model will produce, in seconds. Models that cap the
+        value they send override this so the UI can stop offering a length the
+        request would only have silently shortened.
+        """
+        return 30
+
+    @property
     def supports_lora(self) -> bool:
         """Whether this model accepts LoRA weights and related parameters."""
         return False
