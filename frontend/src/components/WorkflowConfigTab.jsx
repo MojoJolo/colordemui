@@ -105,6 +105,17 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [expandedRunId, setExpandedRunId] = useState(null);
   const [uploadingStep, setUploadingStep] = useState(null);
   const [expandedPickers, setExpandedPickers] = useState({});
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkTemplateIdx, setBulkTemplateIdx] = useState(null);
+
+  // Prompts pasted for one workflow mean nothing in another, and the template
+  // index they copy from points at a step list that no longer exists.
+  function resetBulkAdd() {
+    setBulkOpen(false);
+    setBulkText("");
+    setBulkTemplateIdx(null);
+  }
   const pollRef = useRef(null);
   const uploadInputRefs = useRef({});
 
@@ -166,6 +177,7 @@ export default function WorkflowConfigTab({ onExpand }) {
     });
     setIsNew(false);
     setExpandedPickers({});
+    resetBulkAdd();
     setError(null);
   }
 
@@ -176,6 +188,7 @@ export default function WorkflowConfigTab({ onExpand }) {
     setRuns([]);
     setWfImages([]);
     setExpandedPickers({});
+    resetBulkAdd();
     setError(null);
   }
 
@@ -194,6 +207,45 @@ export default function WorkflowConfigTab({ onExpand }) {
 
   function addStep() {
     setDraft((d) => ({ ...d, steps: [...d.steps, DEFAULT_STEP()] }));
+  }
+
+  // One prompt per line, blank lines dropped — same rule as the generate tab.
+  function splitBulkPrompts(text) {
+    return text.split("\n").map((l) => l.trim()).filter(Boolean);
+  }
+
+  /**
+   * A copy of `template` carrying one pasted prompt. Everything else about the
+   * step comes along — model, outputs, duration, ratio, resolution, overlay —
+   * so twelve shots of the same video share one configuration. The merge picks
+   * are the exception: they name specific earlier steps, and repeating them
+   * across a dozen copies would merge the same clips a dozen times.
+   */
+  function stepFromTemplate(template, prompt) {
+    return {
+      ...template,
+      step_id: null,
+      prompt_template: prompt,
+      merge_source_steps: [],
+      merge_items: [],
+    };
+  }
+
+  function bulkAddSteps() {
+    const prompts = splitBulkPrompts(bulkText);
+    if (prompts.length === 0) return;
+    setDraft((d) => {
+      const tmplIdx = bulkTemplateIdx != null && bulkTemplateIdx < d.steps.length
+        ? bulkTemplateIdx
+        : d.steps.length - 1;
+      const added = prompts.map((p) => stepFromTemplate(d.steps[tmplIdx], p));
+      // A lone untouched step is the placeholder every new workflow starts
+      // with. Keeping it would leave an empty prompt to delete by hand, so the
+      // pasted steps take its place instead of queueing up behind it.
+      const replaceBlank = d.steps.length === 1 && !d.steps[0].prompt_template.trim();
+      return { ...d, steps: replaceBlank ? added : [...d.steps, ...added] };
+    });
+    resetBulkAdd();
   }
 
   // Step references are positional, so they have to be remapped when the list changes
@@ -567,6 +619,15 @@ export default function WorkflowConfigTab({ onExpand }) {
 
   const missingSlots = draft ? getMissingSlots() : [];
 
+  const bulkPrompts = splitBulkPrompts(bulkText);
+  // Which step the pasted prompts copy their settings from: the explicit pick
+  // while it still exists, otherwise the last one — the step just configured.
+  const bulkTemplate = draft
+    ? (bulkTemplateIdx != null && bulkTemplateIdx < draft.steps.length
+        ? bulkTemplateIdx
+        : draft.steps.length - 1)
+    : 0;
+
   // ---- Render ----
 
   return (
@@ -695,7 +756,78 @@ export default function WorkflowConfigTab({ onExpand }) {
           <div className="wf-section">
             <div className="wf-section-header">
               <span className="wf-section-title">Steps</span>
+              <button
+                type="button"
+                className="btn btn-secondary wf-btn-sm"
+                onClick={() => setBulkOpen((v) => !v)}
+                title="Paste several prompts at once, one step per line"
+              >
+                {bulkOpen ? "Close Bulk Add" : "+ Bulk Add"}
+              </button>
             </div>
+
+            {bulkOpen && (
+              <div className="wf-bulk-panel">
+                <div className="wf-bulk-head">
+                  <label className="prompt-label" htmlFor="wf-bulk-template">
+                    Copy settings from
+                  </label>
+                  <select
+                    id="wf-bulk-template"
+                    className="klein-input wf-bulk-select"
+                    value={bulkTemplate}
+                    onChange={(e) => setBulkTemplateIdx(parseInt(e.target.value))}
+                  >
+                    {draft.steps.map((s, si) => (
+                      <option key={si} value={si}>
+                        Step {si + 1} · {s.model}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="wf-hint">
+                  Each line becomes its own step, copying Step {bulkTemplate + 1}'s model,
+                  outputs, duration, ratio and resolution. Set that step up the way you want
+                  the batch, then paste the prompts here.
+                </p>
+                <label className="prompt-label" htmlFor="wf-bulk-prompts">
+                  Prompts{" "}
+                  <span className="prompt-count">
+                    {bulkPrompts.length > 0
+                      ? `(${bulkPrompts.length} step${bulkPrompts.length !== 1 ? "s" : ""})`
+                      : ""}
+                  </span>
+                </label>
+                <textarea
+                  id="wf-bulk-prompts"
+                  className="prompt-textarea wf-bulk-textarea"
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  placeholder="a lone hiker steps onto the ridge at dawn&#10;the camera pulls back over the valley&#10;clouds roll in across the peaks"
+                  rows={8}
+                />
+                <div className="wf-bulk-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary wf-btn-sm"
+                    onClick={bulkAddSteps}
+                    disabled={bulkPrompts.length === 0}
+                  >
+                    {bulkPrompts.length > 0
+                      ? `Add ${bulkPrompts.length} Step${bulkPrompts.length !== 1 ? "s" : ""}`
+                      : "Add Steps"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary wf-btn-sm"
+                    onClick={resetBulkAdd}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="wf-step-list">
               {draft.steps.map((step, i) => {
                 const modelInfo = models.find((m) => m.id === step.model);
