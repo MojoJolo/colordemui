@@ -27,6 +27,10 @@ class GrokVideoModel(ImageModel):
         return True  # optional image/video input; requires_image stays False
 
     @property
+    def accepts_video_input(self) -> bool:
+        return True  # sends a clip as `video`, a still as `image`
+
+    @property
     def supports_duration(self) -> bool:
         return True
 

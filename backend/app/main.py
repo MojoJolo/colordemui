@@ -283,6 +283,7 @@ def _wf_to_response(wf) -> WorkflowResponse:
             save_audio=s.save_audio,
             initial_image_ids=s.initial_image_ids,
             source_step_index=s.source_step_index,
+            chain_last_frame=s.chain_last_frame,
             merge_source_steps=s.merge_source_steps,
             merge_items=s.merge_items,
             language=s.language,

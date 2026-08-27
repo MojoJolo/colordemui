@@ -63,6 +63,7 @@ def list_models() -> List[dict]:
             "is_processor": model.is_processor,
             "is_text": model.is_text,
             "is_upload": model.is_upload,
+            "accepts_video_input": model.accepts_video_input,
             "supports_aspect_ratio": model.supports_aspect_ratio,
             "supports_duration": model.supports_duration,
             "min_duration": model.min_duration,

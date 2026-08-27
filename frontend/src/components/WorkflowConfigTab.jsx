@@ -15,6 +15,7 @@ const DEFAULT_STEP = () => ({
   save_audio: true,
   initial_image_ids: [],
   source_step_index: null,
+  chain_last_frame: false,
   merge_source_steps: [],
   merge_items: [],
   language: "english",
@@ -37,6 +38,7 @@ function normalizeStep(s) {
     save_audio: s.save_audio ?? true,
     initial_image_ids: s.initial_image_ids || [],
     source_step_index: s.source_step_index ?? null,
+    chain_last_frame: s.chain_last_frame ?? false,
     merge_source_steps: s.merge_source_steps || [],
     merge_items: s.merge_items || [],
     language: s.language || "english",
@@ -534,6 +536,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           save_audio: s.save_audio ?? true,
           initial_image_ids: s.initial_image_ids || [],
           source_step_index: s.source_step_index ?? null,
+          chain_last_frame: s.chain_last_frame ?? false,
           merge_source_steps: s.merge_source_steps || [],
           merge_items: s.merge_items || [],
           language: s.language || "english",
@@ -944,6 +947,12 @@ export default function WorkflowConfigTab({ onExpand }) {
                 // the request would silently shorten.
                 const durOverMax = showDuration && (step.duration ?? 5) > durMax;
                 const showResolution = modelInfo && modelInfo.supports_resolution;
+                // Chaining is only meaningful where a still is what the model
+                // wants and the step it draws from makes a clip.
+                const canChain = !!modelInfo && isChained && !isMerger && !isUpload
+                  && !isProcessor && !isTextModel && modelInfo.accepts_image
+                  && !modelInfo.accepts_video_input
+                  && sourceIdx != null && isVideoStep(sourceIdx);
                 const showRefPicker = modelInfo
                   && (modelInfo.is_multi_reference || modelInfo.is_text
                       || modelInfo.is_upload || isProcessor);
@@ -1040,6 +1049,18 @@ export default function WorkflowConfigTab({ onExpand }) {
                                   <option key={si} value={si}>Step {si + 1}</option>
                                 ))}
                             </select>
+                          </div>
+                        )}
+                        {canChain && (
+                          <div className="wf-field wf-field-chain">
+                            <label className="wf-toggle-label">
+                              <input
+                                type="checkbox"
+                                checked={!!step.chain_last_frame}
+                                onChange={(e) => updateStep(i, "chain_last_frame", e.target.checked)}
+                              />
+                              <span>Continue from Step {sourceIdx + 1}</span>
+                            </label>
                           </div>
                         )}
                         {showAspectRatio && (
@@ -1223,6 +1244,14 @@ export default function WorkflowConfigTab({ onExpand }) {
                         <div className="wf-warning">
                           This model does not accept image input — Step {sourceIdx + 1}'s output will not be passed as reference.
                         </div>
+                      )}
+
+                      {canChain && (
+                        <p className="wf-hint">
+                          {step.chain_last_frame
+                            ? `Step ${sourceIdx + 1}'s last frame opens this shot, so the two run together.`
+                            : `Step ${sourceIdx + 1} produces a clip, which ${step.model} cannot take as input — it is ignored unless this step continues from it.`}
+                        </p>
                       )}
 
                       {showRefPicker && (

@@ -89,6 +89,7 @@ class WorkflowStep(BaseModel):
     save_audio: bool = True
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None  # None = use previous step's output
+    chain_last_frame: bool = False           # open on the source clip's final frame
     merge_source_steps: List[int] = []       # merger steps: [] = all preceding video steps
     merge_items: List[MergeItem] = []        # media merger: ordered picks, duplicates allowed
     language: str = "english"

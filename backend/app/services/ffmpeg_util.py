@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -162,6 +163,39 @@ def to_png_bytes(data: bytes) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def last_frame_png(video_bytes: bytes) -> bytes:
+    """
+    Grab a clip's final frame as a PNG, so one shot can open on the image the
+    shot before it ended on.
+
+    -sseof seeks relative to the end, so only the last second is decoded rather
+    than the whole clip, and -update lets each decoded frame overwrite the one
+    before it — whatever is on disk when the stream ends is the last frame. A
+    clip shorter than that seek window yields nothing, so the second pass reads
+    it from the start instead.
+    """
+    with tempfile.TemporaryDirectory(prefix="last_frame_") as tmp:
+        work_dir = Path(tmp)
+        src = work_dir / "clip.mp4"
+        src.write_bytes(video_bytes)
+        dest = work_dir / "last.png"
+
+        proc = None
+        for seek in (["-sseof", "-1"], []):
+            proc = run([
+                ffmpeg_binary(), "-hide_banner", "-y",
+                *seek, "-i", str(src),
+                "-update", "1", "-q:v", "2", str(dest),
+            ])
+            if proc.returncode == 0 and dest.exists() and dest.stat().st_size > 0:
+                return dest.read_bytes()
+
+        raise RuntimeError(
+            "ffmpeg could not read the last frame of the clip:\n"
+            f"{(proc.stderr if proc else '')[-2000:]}"
+        )
 
 
 def image_size(png_bytes: bytes) -> tuple:

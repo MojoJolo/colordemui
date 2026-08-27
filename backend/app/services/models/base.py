@@ -267,6 +267,15 @@ class ImageModel(ABC):
         return False
 
     @property
+    def accepts_video_input(self) -> bool:
+        """
+        Whether this model takes a video where the others take a still. A
+        chained step feeds the previous step's output straight in, so a model
+        that says no is handed that clip's last frame instead of the clip.
+        """
+        return False
+
+    @property
     def min_duration(self) -> int:
         """Shortest clip this model will produce, in seconds."""
         return 1

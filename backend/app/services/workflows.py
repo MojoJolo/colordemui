@@ -7,6 +7,7 @@ from typing import List, Optional
 from app.models import WorkflowConfig, WorkflowRunRecord, WorkflowStep, WorkflowStepResult, ScheduleUnit
 from app.services import models as model_registry
 from app.services import workflow_storage
+from app.services.ffmpeg_util import last_frame_png, sniff_media_kind
 from app.services.storage import GENERATED_DIR
 from app.utils import utcnow
 
@@ -197,6 +198,7 @@ def _build_step(s) -> WorkflowStep:
         save_audio=getattr(s, "save_audio", True),
         initial_image_ids=getattr(s, "initial_image_ids", []),
         source_step_index=getattr(s, "source_step_index", None),
+        chain_last_frame=getattr(s, "chain_last_frame", False),
         merge_source_steps=getattr(s, "merge_source_steps", []),
         merge_items=getattr(s, "merge_items", []),
         language=getattr(s, "language", "english"),
@@ -282,6 +284,34 @@ def _resolve_ref_bytes(
         if step_outputs.get(s):
             return step_outputs[s]
     return []
+
+
+def _as_first_frames(ref_bytes: List[bytes], model, index: int) -> List[bytes]:
+    """
+    Swap each chained clip for its final frame.
+
+    A video step's output is a clip, but a first-frame input is a still, so
+    handing one step's output to the next needs the join made explicit: the
+    last frame of the shot before becomes the first frame of the shot after.
+    Models that read a clip directly, and stills that arrive already still,
+    pass through untouched.
+    """
+    if not ref_bytes or model.accepts_video_input or not model.accepts_image:
+        return ref_bytes
+
+    frames = []
+    for data in ref_bytes:
+        if sniff_media_kind(data) != "video":
+            frames.append(data)
+            continue
+        try:
+            frames.append(last_frame_png(data))
+        except Exception as exc:
+            raise ValueError(
+                f"Step {index + 1} continues from the previous clip, but its "
+                f"last frame could not be read: {exc}"
+            ) from exc
+    return frames
 
 
 def _produces_video(step: WorkflowStep) -> bool:
@@ -476,6 +506,8 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
                         model.process(data, prompt, **_processor_kwargs(model, step))
                     )
             else:
+                if step.chain_last_frame:
+                    ref_bytes = _as_first_frames(ref_bytes, model, i)
                 for j in range(step.num_outputs):
                     if model.is_multi_reference:
                         ref_images = ref_bytes
