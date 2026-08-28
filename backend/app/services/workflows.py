@@ -511,13 +511,15 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
                     ref_bytes = _as_first_frames(ref_bytes, model, i)
                 for j in range(step.num_outputs):
                     if model.is_multi_reference:
-                        ref_images = ref_bytes
-                        if not ref_images:
+                        # Taking references is not the same as needing them:
+                        # nano-banana-2 with none is plain text-to-image, which
+                        # is what opens a workflow that starts on a still.
+                        if not ref_bytes and model.requires_image:
                             raise ValueError(
                                 f"Step {i + 1} uses '{step.model}' which requires reference images, "
                                 "but none are available from the source step or configured initial images."
                             )
-                        img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
+                        img_bytes = model.generate_one(prompt, ref_bytes, seed=None, aspect_ratio=step.aspect_ratio)
                     elif ref_bytes and model.accepts_image:
                         ref = ref_bytes[j % len(ref_bytes)]
                         img_bytes = model.generate(prompt, ref, **_generate_kwargs(model, step))

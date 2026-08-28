@@ -378,6 +378,24 @@ export default function WorkflowConfigTab({ onExpand }) {
     });
   }
 
+  /**
+   * Send one step to the front. An opening image step is added last — every
+   * new step is — but belongs first, and walking it up a dozen shots one press
+   * at a time is the kind of thing nobody does twice.
+   */
+  function moveStepToTop(index) {
+    setDraft((d) => {
+      if (index <= 0) return d;
+      const steps = [d.steps[index], ...d.steps.filter((_, i) => i !== index)];
+      return {
+        ...d,
+        steps: remapStepRefs(steps, (i) =>
+          i === index ? 0 : i < index ? i + 1 : i
+        ),
+      };
+    });
+  }
+
   function moveStep(index, dir) {
     setDraft((d) => {
       const steps = [...d.steps];
@@ -1045,6 +1063,11 @@ export default function WorkflowConfigTab({ onExpand }) {
                   && !isProcessor && !isTextModel && modelInfo.accepts_image
                   && !modelInfo.accepts_video_input
                   && sourceIdx != null && isVideoStep(sourceIdx);
+                // A still source needs no conversion and so has no toggle, but the
+                // step still opens on it and should say so.
+                const opensOnStill = !!modelInfo && isChained && !isMerger && !isUpload
+                  && !isProcessor && !isTextModel && modelInfo.accepts_image
+                  && sourceIdx != null && !isVideoStep(sourceIdx);
                 const showRefPicker = modelInfo
                   && (modelInfo.is_multi_reference || modelInfo.is_text
                       || modelInfo.is_upload || isProcessor);
@@ -1070,6 +1093,13 @@ export default function WorkflowConfigTab({ onExpand }) {
                     <div className="wf-step-header">
                       <span className="wf-step-num">Step {i + 1}</span>
                       <div className="wf-step-actions">
+                        <button
+                          type="button"
+                          className="btn btn-secondary wf-btn-sm"
+                          onClick={() => moveStepToTop(i)}
+                          disabled={i === 0}
+                          title="Move to top"
+                        >⤒</button>
                         <button
                           type="button"
                           className="btn btn-secondary wf-btn-sm"
@@ -1336,6 +1366,12 @@ export default function WorkflowConfigTab({ onExpand }) {
                         <div className="wf-warning">
                           This model does not accept image input — Step {sourceIdx + 1}'s output will not be passed as reference.
                         </div>
+                      )}
+
+                      {opensOnStill && (
+                        <p className="wf-hint">
+                          Step {sourceIdx + 1}'s image opens this shot.
+                        </p>
                       )}
 
                       {canChain && (
