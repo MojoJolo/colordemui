@@ -120,6 +120,7 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [expandedRunId, setExpandedRunId] = useState(null);
   const [uploadingStep, setUploadingStep] = useState(null);
   const [expandedPickers, setExpandedPickers] = useState({});
+  const [stoppingRunId, setStoppingRunId] = useState(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [bulkTemplateIdx, setBulkTemplateIdx] = useState(null);
@@ -167,7 +168,7 @@ export default function WorkflowConfigTab({ onExpand }) {
           map.set(run.run_id, run);
           return [...map.values()].sort((a, b) => b.started_at.localeCompare(a.started_at));
         });
-        if (run.status === "done" || run.status === "failed") {
+        if (run.status !== "running") {
           setActiveRunId(null);
           api.getWorkflowImages(selectedId).then(setWfImages).catch(() => {});
           api.listWorkflowRuns(selectedId).then(setRuns).catch(() => {});
@@ -728,6 +729,19 @@ export default function WorkflowConfigTab({ onExpand }) {
       setWfImages([]);
     } catch (e) {
       setError(e.message || "Delete failed.");
+    }
+  }
+
+  async function handleStopRun(runId) {
+    setStoppingRunId(runId);
+    setError(null);
+    try {
+      await api.stopWorkflowRun(selectedId, runId);
+      const updated = await api.listWorkflowRuns(selectedId);
+      setRuns(updated);
+    } catch (e) {
+      setStoppingRunId(null);
+      setError(e.message || "Could not stop the run.");
     }
   }
 
@@ -1836,6 +1850,17 @@ export default function WorkflowConfigTab({ onExpand }) {
                   <span className={`wf-run-badge ${run.status}`}>{run.status}</span>
                   <span className="wf-run-time">{formatDate(run.started_at)}</span>
                   <span className="wf-run-prog">{run.completed}/{run.total} images</span>
+                  {run.status === "running" && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary wf-btn-sm wf-run-stop"
+                      onClick={(e) => { e.stopPropagation(); handleStopRun(run.run_id); }}
+                      disabled={stoppingRunId === run.run_id}
+                      title="Finish the step running now, then stop"
+                    >
+                      {stoppingRunId === run.run_id ? "Stopping…" : "Stop"}
+                    </button>
+                  )}
                   <span className="wf-run-toggle">{expandedRunId === run.run_id ? "▲" : "▼"}</span>
                 </div>
                 {expandedRunId === run.run_id && (

@@ -405,6 +405,25 @@ def get_workflow_run(workflow_id: str, run_id: str):
     return _run_to_response(run, wf)
 
 
+@app.post("/workflows/{workflow_id}/runs/{run_id}/stop", response_model=WorkflowRunResponse)
+def stop_workflow_run(workflow_id: str, run_id: str):
+    """
+    Ask a run to stop after the step it is on. The step in flight has already
+    been paid for at Replicate, so it finishes and is kept; nothing after it
+    starts.
+    """
+    wf = workflow_service.get_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    run = workflow_storage.load_run(wf.slug, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status != "running":
+        raise HTTPException(status_code=409, detail=f"Run is already {run.status}")
+    workflow_service.request_stop(run_id)
+    return _run_to_response(run, wf)
+
+
 @app.get("/workflows/{workflow_id}/images", response_model=List[ImageResponse])
 def get_workflow_images(workflow_id: str):
     images = workflow_service.get_workflow_images(workflow_id)

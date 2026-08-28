@@ -1941,6 +1941,15 @@ body {
   color: #dc2626;
 }
 
+.wf-run-badge.stopped {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.wf-run-stop {
+  margin-left: auto;
+}
+
 .wf-run-time {
   font-size: 0.82rem;
   color: #4b5563;

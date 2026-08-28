@@ -1,5 +1,6 @@
 import random
 import re
+import threading
 import uuid
 from pathlib import Path
 from typing import List, Optional
@@ -10,6 +11,28 @@ from app.services import workflow_storage
 from app.services.ffmpeg_util import last_frame_png, sniff_media_kind
 from app.services.storage import GENERATED_DIR
 from app.utils import utcnow
+
+
+# Runs asked to stop, by run_id. A run is a plain loop in a background thread,
+# so stopping it means letting it notice between steps rather than killing it:
+# the shot in flight is already paid for and is kept.
+_stop_requested: set = set()
+_stop_lock = threading.Lock()
+
+
+def request_stop(run_id: str) -> None:
+    with _stop_lock:
+        _stop_requested.add(run_id)
+
+
+def _stop_wanted(run_id: str) -> bool:
+    with _stop_lock:
+        return run_id in _stop_requested
+
+
+def _clear_stop(run_id: str) -> None:
+    with _stop_lock:
+        _stop_requested.discard(run_id)
 
 
 def _filenames_by_ids(image_ids: List[str]) -> List[str]:
@@ -443,6 +466,7 @@ def _processor_kwargs(model, step: WorkflowStep) -> dict:
 def run_workflow(workflow_id: str, run_id: str) -> None:
     wf = workflow_storage.load_workflow(workflow_id)
     if not wf:
+        _clear_stop(run_id)
         print(f"[workflow {workflow_id[:8]}] not found, aborting run")
         return
 
@@ -465,6 +489,16 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
     picked_slots = {slot: [random.choice(words)] for slot, words in wf.slot_lists.items() if words}
 
     for i, step in enumerate(wf.steps):
+        # Checked between steps, so a stop lands after the shot in flight
+        # finishes rather than throwing that render away.
+        if _stop_wanted(run_id):
+            run.status = "stopped"
+            run.finished_at = utcnow()
+            workflow_storage.save_run(run)
+            _clear_stop(run_id)
+            print(f"[workflow {workflow_id[:8]}] run {run_id[:8]} stopped before step {i + 1}")
+            return
+
         model = model_registry.get_model(step.model)
         output_dir = GENERATED_DIR / wf.slug
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -554,6 +588,7 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
             run.status = "failed"
             run.finished_at = utcnow()
             workflow_storage.save_run(run)
+            _clear_stop(run_id)
             print(f"[workflow {workflow_id[:8]}] step {i} failed: {exc}")
             return
 
@@ -563,6 +598,9 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
     run.status = "done"
     run.finished_at = utcnow()
     workflow_storage.save_run(run)
+    # A stop that arrived during the last step changed nothing — the run had
+    # already finished the work — but the request must not outlive it.
+    _clear_stop(run_id)
     print(f"[workflow {workflow_id[:8]}] run {run_id[:8]} complete")
 
 
