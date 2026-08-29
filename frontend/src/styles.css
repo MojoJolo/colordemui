@@ -1842,6 +1842,21 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.wf-bulk-preview-model {
+  flex: 0 0 7.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  color: #1a1d23;
+}
+
+.wf-bulk-preview-wiring {
+  flex: 0 0 6.5rem;
+  color: #6b7280;
+  font-size: 0.76rem;
+}
+
 .wf-bulk-preview-dur {
   flex: 0 0 2.6rem;
   text-align: right;

@@ -89,7 +89,13 @@ class WorkflowStep(BaseModel):
     save_audio: bool = True
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None  # None = use previous step's output
-    chain_last_frame: bool = False           # open on the source clip's final frame
+    # What the source step hands over. minimax-h3 rejects a first frame and
+    # reference images together, so this is one choice rather than two flags:
+    #   none        ignore the source entirely
+    #   last_frame  open on the source clip's final frame
+    #   reference   pass the source images as reference_image_urls
+    input_mode: str = "last_frame"
+    reference_source_steps: List[int] = []   # reference mode: [] = all earlier image steps
     from_bulk: bool = False                  # added by Bulk Add; replaced by the next one
     merge_source_steps: List[int] = []       # merger steps: [] = all preceding video steps
     merge_items: List[MergeItem] = []        # media merger: ordered picks, duplicates allowed

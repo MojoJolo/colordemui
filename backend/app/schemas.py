@@ -68,7 +68,8 @@ class WorkflowStepRequest(BaseModel):
     save_audio: bool = True
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
-    chain_last_frame: bool = False
+    input_mode: str = "last_frame"
+    reference_source_steps: List[int] = []
     from_bulk: bool = False
     merge_source_steps: List[int] = []
     merge_items: List[MergeItem] = []
@@ -102,7 +103,8 @@ class WorkflowStepResponse(BaseModel):
     save_audio: bool = True
     initial_image_ids: List[str] = []
     source_step_index: Optional[int] = None
-    chain_last_frame: bool = False
+    input_mode: str = "last_frame"
+    reference_source_steps: List[int] = []
     from_bulk: bool = False
     merge_source_steps: List[int] = []
     merge_items: List[MergeItem] = []

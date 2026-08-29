@@ -15,9 +15,10 @@ const DEFAULT_STEP = () => ({
   save_audio: true,
   initial_image_ids: [],
   source_step_index: null,
-  // On by default: a step placed after a video step is nearly always the next
-  // shot of the same scene, and an unchained one opens on nothing.
-  chain_last_frame: true,
+  // A step placed after a video step is nearly always the next shot of the same
+  // scene, so it opens on that clip's last frame unless told otherwise.
+  input_mode: "last_frame",
+  reference_source_steps: [],
   from_bulk: false,
   merge_source_steps: [],
   merge_items: [],
@@ -41,7 +42,8 @@ function normalizeStep(s) {
     save_audio: s.save_audio ?? true,
     initial_image_ids: s.initial_image_ids || [],
     source_step_index: s.source_step_index ?? null,
-    chain_last_frame: s.chain_last_frame ?? false,
+    input_mode: s.input_mode || (s.chain_last_frame ? "last_frame" : "none"),
+    reference_source_steps: s.reference_source_steps || [],
     from_bulk: s.from_bulk ?? false,
     merge_source_steps: s.merge_source_steps || [],
     merge_items: s.merge_items || [],
@@ -56,9 +58,13 @@ function normalizeStep(s) {
   };
 }
 
-// A bulk prompt may lead with the clip length it wants: "6 | a hiker on the
-// ridge" (the "s" in "6s |" is optional). Anything after the pipe is the prompt.
-const BULK_DURATION_RE = /^(\d{1,3})\s*s?\s*\|\s*(.*)$/i;
+// A bulk prompt may lead with a header naming the model it wants, the clip
+// length it wants, or both in either order: "minimax-h3 10 | a hiker on the
+// ridge". Every model id is one hyphenated token, so the header splits on
+// whitespace with nothing to disambiguate. Anything after the pipe is the
+// prompt, and a prompt with no header is left entirely to the template.
+const BULK_HEADER_RE = /^([^|\n]{0,80})\|([\s\S]*)$/;
+const BULK_DURATION_TOKEN_RE = /^(\d{1,3})s?$/i;
 
 // What divides one bulk prompt from the next, matching the generate forms.
 // A shot prompt runs to several paragraphs with blank lines inside it, so
@@ -120,6 +126,7 @@ export default function WorkflowConfigTab({ onExpand }) {
   const [expandedRunId, setExpandedRunId] = useState(null);
   const [uploadingStep, setUploadingStep] = useState(null);
   const [expandedPickers, setExpandedPickers] = useState({});
+  const [publicBaseUrl, setPublicBaseUrl] = useState("");
   const [stoppingRunId, setStoppingRunId] = useState(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
@@ -138,6 +145,7 @@ export default function WorkflowConfigTab({ onExpand }) {
   // Load models + workflows + all images on mount
   useEffect(() => {
     api.listModels().then(setModels).catch(() => {});
+    api.getConfig().then((c) => setPublicBaseUrl(c.public_base_url || "")).catch(() => {});
     api.listWorkflows().then(setWorkflows).catch(() => {});
     api.getAllImages().then(setAllImages).catch(() => {});
   }, []);
@@ -242,26 +250,87 @@ export default function WorkflowConfigTab({ onExpand }) {
    * duration at all. Out-of-range values are clamped and flagged rather than
    * dropped, since the model would have quietly shortened them anyway.
    */
-  function parseBulkBlocks(text, bounds) {
+  function parseBulkBlocks(text, templateModel) {
     const lines = [];
     for (const block of text.split(BULK_SEPARATOR)) {
       const body = block.trim();
       if (!body) continue;
+
+      // The header, if any, is on the first line — a pipe deeper into a long
+      // prompt is part of the prompt.
       const breakAt = body.indexOf("\n");
       const head = breakAt === -1 ? body : body.slice(0, breakAt);
       const tail = breakAt === -1 ? "" : body.slice(breakAt);
-      const m = bounds ? BULK_DURATION_RE.exec(head) : null;
-      const prompt = (m ? m[2] + tail : body).trim();
-      if (!prompt) continue;
-      if (!m) {
-        lines.push({ prompt, duration: null, asked: null, clamped: false });
-        continue;
+      const m = BULK_HEADER_RE.exec(head);
+
+      let model = templateModel;
+      let asked = null;
+      let unknownModel = null;
+      let prompt = body;
+
+      if (m) {
+        prompt = (m[2] + tail).trim();
+        for (const token of m[1].trim().split(/\s+/).filter(Boolean)) {
+          const asDuration = BULK_DURATION_TOKEN_RE.exec(token);
+          if (asDuration) {
+            asked = parseInt(asDuration[1], 10);
+          } else if (models.some((mm) => mm.id === token)) {
+            model = token;
+          } else {
+            // Naming a model that does not exist is a typo, and guessing at it
+            // would build a batch of the wrong thing.
+            unknownModel = token;
+          }
+        }
       }
-      const asked = parseInt(m[1], 10);
-      const duration = Math.min(bounds.max, Math.max(bounds.min, asked));
-      lines.push({ prompt, duration, asked, clamped: duration !== asked });
+      if (!prompt) continue;
+
+      const info = models.find((mm) => mm.id === model);
+      const timed = !!info?.supports_duration;
+      const min = info?.min_duration ?? 1;
+      const max = info?.max_duration ?? 30;
+      const duration = timed && asked != null
+        ? Math.min(max, Math.max(min, asked))
+        : null;
+
+      lines.push({
+        prompt,
+        model,
+        duration,
+        asked: timed ? asked : null,
+        clamped: duration != null && duration !== asked,
+        unknownModel,
+        min,
+        max,
+      });
     }
     return lines;
+  }
+
+  /**
+   * Work out what feeds each step of a pasted batch.
+   *
+   * A batch that opens with image steps is a character sheet: the first video
+   * step after it takes those images as references, and every video step after
+   * that carries on from the clip before it. That is the shape a series wants —
+   * identity fixed once at the top, continuity from there — and it is what the
+   * paste is describing, so it is applied rather than left to be clicked in.
+   */
+  function wireBulkLines(lines) {
+    let referenced = false;
+    return lines.map((line, i) => {
+      const info = models.find((m) => m.id === line.model);
+      const isVideo = info?.output_extension === ".mp4";
+      const stillsBefore = lines.slice(0, i).some(
+        (l) => models.find((m) => m.id === l.model)?.output_extension !== ".mp4"
+      );
+      if (!isVideo) return { ...line, input_mode: "none" };
+      if (!referenced && stillsBefore) {
+        referenced = true;
+        return { ...line, input_mode: "reference" };
+      }
+      return { ...line, input_mode: i === 0 ? "none" : "last_frame" };
+    });
   }
 
   /**
@@ -278,9 +347,12 @@ export default function WorkflowConfigTab({ onExpand }) {
     return {
       ...template,
       step_id: null,
+      model: line.model || template.model,
       prompt_template: line.prompt,
       duration: line.duration ?? template.duration,
+      input_mode: line.input_mode ?? template.input_mode ?? "last_frame",
       source_step_index: null,
+      reference_source_steps: [],
       merge_source_steps: [],
       merge_items: [],
       from_bulk: true,
@@ -317,7 +389,7 @@ export default function WorkflowConfigTab({ onExpand }) {
    * default of joining every video step before it.
    */
   function bulkAddSteps(lines, templateIdx) {
-    if (lines.length === 0) return;
+    if (lines.length === 0 || lines.some((l) => l.unknownModel)) return;
     setDraft((d) => {
       const added = lines.map((line) => stepFromTemplate(d.steps[templateIdx], line));
 
@@ -356,6 +428,9 @@ export default function WorkflowConfigTab({ onExpand }) {
       ...s,
       source_step_index: s.source_step_index == null ? null : mapIndex(s.source_step_index),
       merge_source_steps: (s.merge_source_steps || [])
+        .map(mapIndex)
+        .filter((i) => i != null),
+      reference_source_steps: (s.reference_source_steps || [])
         .map(mapIndex)
         .filter((i) => i != null),
       merge_items: (s.merge_items || [])
@@ -613,7 +688,8 @@ export default function WorkflowConfigTab({ onExpand }) {
           save_audio: s.save_audio ?? true,
           initial_image_ids: s.initial_image_ids || [],
           source_step_index: s.source_step_index ?? null,
-          chain_last_frame: s.chain_last_frame ?? false,
+          input_mode: s.input_mode || "none",
+          reference_source_steps: s.reference_source_steps || [],
           from_bulk: s.from_bulk ?? false,
           merge_source_steps: s.merge_source_steps || [],
           merge_items: s.merge_items || [],
@@ -776,12 +852,18 @@ export default function WorkflowConfigTab({ onExpand }) {
   const bulkTemplateModel = bulkTemplate != null ? draft.steps[bulkTemplate].model : null;
   const bulkTimed = !!models.find((m) => m.id === bulkTemplateModel)?.supports_duration;
   const bulkRange = bulkTimed ? durationBounds(bulkTemplateModel) : null;
-  const bulkLines = parseBulkBlocks(bulkText, bulkRange);
+  const bulkLines = wireBulkLines(parseBulkBlocks(bulkText, bulkTemplateModel));
+  const bulkUnknown = [...new Set(bulkLines.map((l) => l.unknownModel).filter(Boolean))];
+  const bulkReferenceCount = bulkLines.filter((l) => l.input_mode === "reference").length
+    ? bulkLines.filter((l) => models.find((m) => m.id === l.model)?.output_extension !== ".mp4").length
+    : 0;
   // What the batch would add up to, so a minute of video can be planned in the
   // box rather than counted afterwards.
-  const bulkSeconds = bulkTimed
-    ? bulkLines.reduce((acc, l) => acc + (l.duration ?? draft.steps[bulkTemplate].duration ?? 0), 0)
-    : 0;
+  const bulkSeconds = bulkLines.reduce((acc, l) => {
+    const info = models.find((m) => m.id === l.model);
+    if (!info?.supports_duration) return acc;
+    return acc + (l.duration ?? draft.steps[bulkTemplate].duration ?? 0);
+  }, 0);
   const bulkTemplateDuration = bulkTemplate != null ? draft.steps[bulkTemplate].duration : 0;
   const bulkClamped = bulkLines.filter((l) => l.clamped);
   // Steps the last batch left behind, which this one replaces
@@ -954,21 +1036,18 @@ export default function WorkflowConfigTab({ onExpand }) {
                   </select>
                 </div>
                 <p className="wf-hint">
-                  Each prompt becomes its own step, copying Step {bulkTemplate + 1}'s model,
-                  outputs, ratio and resolution. Set that step up the way you want the batch,
-                  then paste the prompts here, separated by <code>=====</code> as on the
-                  generate tabs.
+                  Each prompt becomes its own step, taking outputs, ratio and resolution
+                  from Step {bulkTemplate + 1}. Separate prompts with <code>=====</code> as
+                  on the generate tabs. Start one with a model name, a clip length, or
+                  both — <code>nano-banana-2 |</code>, <code>minimax-h3 10 |</code>,{" "}
+                  <code>8 |</code> — and anything left out comes from Step{" "}
+                  {bulkTemplate + 1} ({bulkTemplateModel}
+                  {bulkTimed ? `, ${bulkTemplateDuration}s` : ""}).
                   {bulkReplacing > 0 && (
                     <>
                       {" "}This replaces the {bulkReplacing} step
                       {bulkReplacing !== 1 ? "s" : ""} the last Bulk Add created — every other
                       step keeps its place, including a merge step at the end.
-                    </>
-                  )}
-                  {bulkTimed && (
-                    <>
-                      {" "}Start a prompt with <code>6 |</code> to give that shot its own
-                      length; prompts without one run for {bulkTemplateDuration}s.
                     </>
                   )}
                 </p>
@@ -986,37 +1065,65 @@ export default function WorkflowConfigTab({ onExpand }) {
                   className="prompt-textarea wf-bulk-textarea"
                   value={bulkText}
                   onChange={(e) => setBulkText(e.target.value)}
-                  placeholder={bulkTimed
-                    ? "6 | a lone hiker steps onto the ridge at dawn\n\nHe wears a red shell jacket and a heavy pack.\n\n=====\n\n4 | the camera pulls back over the valley\n\n=====\n\nclouds roll in across the peaks"
-                    : "a lone hiker steps onto the ridge at dawn\n\n=====\n\nthe camera pulls back over the valley\n\n=====\n\nclouds roll in across the peaks"}
+                  placeholder={"nano-banana-2 | Mia, 25, front view, neutral expression\n\n=====\n\nnano-banana-2 | Paolo, 27, three-quarter view\n\n=====\n\nminimax-h3 10 | they walk beneath the umbrella\n\n=====\n\n8 | the camera pulls back"}
                   rows={10}
                 />
+                {bulkUnknown.length > 0 && (
+                  <div className="wf-warning">
+                    No model called {bulkUnknown.map((u) => `"${u}"`).join(", ")}. Nothing
+                    will be added until that is fixed — a typo here would otherwise build a
+                    batch of the wrong thing.
+                  </div>
+                )}
                 {bulkLines.length > 0 && (
                   <>
                     <p className="wf-hint">Steps this would add:</p>
                     <ol className="wf-bulk-preview">
-                      {bulkLines.map((line, k) => (
-                        <li key={k} className="wf-bulk-preview-item">
-                          {bulkTimed && (
+                      {bulkLines.map((line, k) => {
+                        const info = models.find((m) => m.id === line.model);
+                        const timed = !!info?.supports_duration;
+                        return (
+                          <li key={k} className="wf-bulk-preview-item">
+                            <span className="wf-bulk-preview-model">{line.model}</span>
                             <span className="wf-bulk-preview-dur">
-                              {line.duration ?? bulkTemplateDuration}s
+                              {timed ? `${line.duration ?? bulkTemplateDuration}s` : ""}
                             </span>
-                          )}
-                          <span className="wf-bulk-preview-text">
-                            {line.prompt.replace(/\s+/g, " ").slice(0, 110)}
-                            {line.prompt.length > 110 ? "…" : ""}
-                          </span>
-                        </li>
-                      ))}
+                            <span className="wf-bulk-preview-wiring">
+                              {line.input_mode === "reference"
+                                ? `ref ×${bulkReferenceCount}`
+                                : line.input_mode === "last_frame"
+                                ? "← last frame"
+                                : ""}
+                            </span>
+                            <span className="wf-bulk-preview-text">
+                              {line.prompt.replace(/\s+/g, " ").slice(0, 90)}
+                              {line.prompt.length > 90 ? "…" : ""}
+                            </span>
+                          </li>
+                        );
+                      })}
                     </ol>
                   </>
                 )}
+                {bulkReferenceCount > 0 && !publicBaseUrl && (
+                  <div className="wf-warning">
+                    Reference images are fetched by URL, so this batch needs PUBLIC_BASE_URL
+                    set on the backend to the address this app is reachable at. Without it
+                    the referencing step will stop the run rather than generate without them.
+                  </div>
+                )}
+                {bulkReferenceCount > 5 && (
+                  <p className="wf-hint wf-hint-warn">
+                    {bulkReferenceCount} reference images. Beyond about five they may dilute
+                    rather than pin — worth comparing against two or three.
+                  </p>
+                )}
                 {bulkClamped.length > 0 && (
                   <div className="wf-warning">
-                    {bulkTemplateModel} runs {bulkRange.min}–{bulkRange.max}s.{" "}
                     {bulkClamped.length} prompt{bulkClamped.length !== 1 ? "s" : ""}{" "}
-                    {bulkClamped.length === 1 ? "falls" : "fall"} outside that:{" "}
-                    {bulkClamped.map((l) => `${l.asked}s → ${l.duration}s`).join(", ")}.
+                    {bulkClamped.length === 1 ? "asks" : "ask"} for a length its model will
+                    not produce:{" "}
+                    {bulkClamped.map((l) => `${l.asked}s → ${l.duration}s (${l.model} runs ${l.min}–${l.max}s)`).join(", ")}.
                   </div>
                 )}
                 <div className="wf-bulk-actions">
@@ -1024,9 +1131,9 @@ export default function WorkflowConfigTab({ onExpand }) {
                     type="button"
                     className="btn btn-primary wf-btn-sm"
                     onClick={() => bulkAddSteps(bulkLines, bulkTemplate)}
-                    disabled={bulkLines.length === 0}
+                    disabled={bulkLines.length === 0 || bulkUnknown.length > 0}
                   >
-                    {bulkLines.length === 0
+                    {bulkLines.length === 0 || bulkUnknown.length > 0
                       ? "Add Steps"
                       : bulkReplacing > 0
                       ? `Replace with ${bulkLines.length} Step${bulkLines.length !== 1 ? "s" : ""}`
@@ -1071,17 +1178,29 @@ export default function WorkflowConfigTab({ onExpand }) {
                 // the request would silently shorten.
                 const durOverMax = showDuration && (step.duration ?? 5) > durMax;
                 const showResolution = modelInfo && modelInfo.supports_resolution;
-                // Chaining is only meaningful where a still is what the model
-                // wants and the step it draws from makes a clip.
-                const canChain = !!modelInfo && isChained && !isMerger && !isUpload
-                  && !isProcessor && !isTextModel && modelInfo.accepts_image
-                  && !modelInfo.accepts_video_input
-                  && sourceIdx != null && isVideoStep(sourceIdx);
-                // A still source needs no conversion and so has no toggle, but the
-                // step still opens on it and should say so.
-                const opensOnStill = !!modelInfo && isChained && !isMerger && !isUpload
-                  && !isProcessor && !isTextModel && modelInfo.accepts_image
-                  && sourceIdx != null && !isVideoStep(sourceIdx);
+                // A step takes an input at all only if it generates from one.
+                const takesInput = !!modelInfo && isChained && !isMerger && !isUpload
+                  && !isProcessor && !isTextModel && modelInfo.accepts_image;
+                // The source can open this step whenever it produces an image
+                // or a clip this model can read a frame from.
+                const sourceIsClip = sourceIdx != null && isVideoStep(sourceIdx);
+                const canUseSource = takesInput && sourceIdx != null
+                  && !(sourceIsClip && modelInfo.accepts_video_input);
+                const sourceLabel = sourceIsClip
+                  ? "Previous clip's last frame"
+                  : "Previous step's image";
+                // Reference images are fetched by URL, so they can only come
+                // from steps that produce stills.
+                const stillStepIdxs = draft.steps.slice(0, i).map((_, si) => si)
+                  .filter((si) => !isTextStep(si) && !isVideoStep(si)
+                    && !(models.find((m) => m.id === draft.steps[si].model) || {}).is_merger);
+                const canReference = takesInput && !!modelInfo.supports_reference_urls
+                  && stillStepIdxs.length > 0;
+                const refSources = (step.reference_source_steps || []).filter((si) => si < i);
+                const effectiveRefs = refSources.length ? refSources : stillStepIdxs;
+                const refCount = effectiveRefs.reduce(
+                  (acc, si) => acc + (draft.steps[si]?.num_outputs || 0), 0
+                );
                 const showRefPicker = modelInfo
                   && (modelInfo.is_multi_reference || modelInfo.is_text
                       || modelInfo.is_upload || isProcessor);
@@ -1187,16 +1306,22 @@ export default function WorkflowConfigTab({ onExpand }) {
                             </select>
                           </div>
                         )}
-                        {canChain && (
+                        {(canUseSource || canReference) && (
                           <div className="wf-field wf-field-chain">
-                            <label className="wf-toggle-label">
-                              <input
-                                type="checkbox"
-                                checked={!!step.chain_last_frame}
-                                onChange={(e) => updateStep(i, "chain_last_frame", e.target.checked)}
-                              />
-                              <span>Continue from Step {sourceIdx + 1}</span>
-                            </label>
+                            <label className="prompt-label">Opens on</label>
+                            <select
+                              className="klein-input"
+                              value={step.input_mode || "none"}
+                              onChange={(e) => updateStep(i, "input_mode", e.target.value)}
+                            >
+                              <option value="none">Nothing</option>
+                              {canUseSource && (
+                                <option value="last_frame">{sourceLabel}</option>
+                              )}
+                              {canReference && (
+                                <option value="reference">Reference images</option>
+                              )}
+                            </select>
                           </div>
                         )}
                         {showAspectRatio && (
@@ -1382,17 +1507,58 @@ export default function WorkflowConfigTab({ onExpand }) {
                         </div>
                       )}
 
-                      {opensOnStill && (
+                      {step.input_mode === "reference" && canReference && (
+                        <div className="wf-merge-picker">
+                          <label className="prompt-label">Reference images from</label>
+                          <div className="wf-merge-options">
+                            {stillStepIdxs.map((si) => (
+                              <label key={si} className="wf-merge-option">
+                                <input
+                                  type="checkbox"
+                                  checked={refSources.includes(si)}
+                                  onChange={() => updateStep(
+                                    i,
+                                    "reference_source_steps",
+                                    refSources.includes(si)
+                                      ? refSources.filter((x) => x !== si)
+                                      : [...refSources, si].sort((a, b) => a - b)
+                                  )}
+                                />
+                                <span>
+                                  Step {si + 1}
+                                  <span className="wf-merge-option-meta">
+                                    {" "}· {draft.steps[si].model}
+                                  </span>
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                          <p className="wf-hint">
+                            {refCount} image{refCount !== 1 ? "s" : ""} passed as references.
+                            {refSources.length === 0 && " Nothing checked — every earlier image step is used."}
+                            {refCount > 5 && " Beyond about five they may dilute rather than pin."}
+                          </p>
+                          {!publicBaseUrl && (
+                            <div className="wf-warning">
+                              References are fetched by URL, so this needs PUBLIC_BASE_URL set
+                              on the backend. Without it the step stops the run rather than
+                              generating without them.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {step.input_mode === "last_frame" && canUseSource && (
                         <p className="wf-hint">
-                          Step {sourceIdx + 1}'s image opens this shot.
+                          {sourceIsClip
+                            ? `Step ${sourceIdx + 1}'s last frame opens this shot, so the two run together.`
+                            : `Step ${sourceIdx + 1}'s image opens this shot.`}
                         </p>
                       )}
 
-                      {canChain && (
+                      {takesInput && step.input_mode === "none" && sourceIdx != null && (
                         <p className="wf-hint">
-                          {step.chain_last_frame
-                            ? `Step ${sourceIdx + 1}'s last frame opens this shot, so the two run together.`
-                            : `Step ${sourceIdx + 1} produces a clip, which ${step.model} cannot take as input — it is ignored unless this step continues from it.`}
+                          Nothing from Step {sourceIdx + 1} is used — this shot starts from the prompt alone.
                         </p>
                       )}
 

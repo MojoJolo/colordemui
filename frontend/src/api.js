@@ -218,6 +218,10 @@ export async function getWorkflowRun(workflowId, runId) {
   return handleResponse(await fetch(`/workflows/${workflowId}/runs/${runId}`, { headers: authHeaders() }));
 }
 
+export async function getConfig() {
+  return handleResponse(await fetch("/config", { headers: authHeaders() }));
+}
+
 export async function stopWorkflowRun(workflowId, runId) {
   return handleResponse(
     await fetch(`/workflows/${workflowId}/runs/${runId}/stop`, {

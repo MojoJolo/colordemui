@@ -108,6 +108,17 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/config")
+def get_config():
+    """
+    Settings the UI has to know about to warn before a run rather than after.
+    Reference images are fetched by URL, so without a public base URL a step
+    that uses them cannot work — and that is worth saying while it is being
+    configured.
+    """
+    return {"public_base_url": workflow_service.public_base_url()}
+
+
 @app.get("/models")
 def list_models():
     return model_registry.list_models()
@@ -283,7 +294,8 @@ def _wf_to_response(wf) -> WorkflowResponse:
             save_audio=s.save_audio,
             initial_image_ids=s.initial_image_ids,
             source_step_index=s.source_step_index,
-            chain_last_frame=s.chain_last_frame,
+            input_mode=s.input_mode,
+            reference_source_steps=s.reference_source_steps,
             from_bulk=s.from_bulk,
             merge_source_steps=s.merge_source_steps,
             merge_items=s.merge_items,
