@@ -252,6 +252,7 @@ export default function WorkflowConfigTab({ onExpand }) {
    */
   function parseBulkBlocks(text, templateModel) {
     const lines = [];
+    let carried = null;
     for (const block of text.split(BULK_SEPARATOR)) {
       const body = block.trim();
       if (!body) continue;
@@ -263,7 +264,7 @@ export default function WorkflowConfigTab({ onExpand }) {
       const tail = breakAt === -1 ? "" : body.slice(breakAt);
       const m = BULK_HEADER_RE.exec(head);
 
-      let model = templateModel;
+      let model = null;
       let asked = null;
       let unknownModel = null;
       let prompt = body;
@@ -284,6 +285,13 @@ export default function WorkflowConfigTab({ onExpand }) {
         }
       }
       if (!prompt) continue;
+
+      // A prompt that names no model continues the one above it. In a script
+      // that opens with a sheet and then runs shots, the shots after the first
+      // are the same model as it — and inheriting from the template step would
+      // make them copies of the sheet instead.
+      model = model || carried || templateModel;
+      carried = model;
 
       const info = models.find((mm) => mm.id === model);
       const timed = !!info?.supports_duration;
@@ -307,30 +315,49 @@ export default function WorkflowConfigTab({ onExpand }) {
     return lines;
   }
 
+  /** What a step leaves behind for the next one to open on. */
+  function stepKind(modelId) {
+    const info = models.find((m) => m.id === modelId);
+    if (!info || info.is_text) return null;
+    return info.output_extension === ".mp4" ? "video" : "still";
+  }
+
   /**
    * Work out what feeds each step of a pasted batch.
    *
-   * A batch that opens with image steps is a character sheet: the first video
-   * step after it takes those images as references, and every video step after
-   * that carries on from the clip before it. That is the shape a series wants —
-   * identity fixed once at the top, continuity from there — and it is what the
-   * paste is describing, so it is applied rather than left to be clicked in.
+   * Each video step looks back to the nearest thing that produced something: a
+   * still means a character sheet, so it goes in as a reference; a clip means
+   * the shot before, so it opens on that clip's last frame. Identity fixed once
+   * at the top, continuity from there.
+   *
+   * `preceding` is the steps already in the workflow ahead of the batch, so a
+   * sheet that was built once and kept — an upload step pointing at images from
+   * an earlier run — wires up the same as one included in the paste. Without
+   * that, reusing a sheet across episodes would mean re-picking it by hand
+   * every time the shots were re-pasted.
    */
-  function wireBulkLines(lines) {
-    let referenced = false;
+  function wireBulkLines(lines, preceding = []) {
+    const before = preceding.map((s) => stepKind(s.model));
+    const kinds = [...before, ...lines.map((l) => stepKind(l.model))];
     return lines.map((line, i) => {
-      const info = models.find((m) => m.id === line.model);
-      const isVideo = info?.output_extension === ".mp4";
-      const stillsBefore = lines.slice(0, i).some(
-        (l) => models.find((m) => m.id === l.model)?.output_extension !== ".mp4"
-      );
-      if (!isVideo) return { ...line, input_mode: "none" };
-      if (!referenced && stillsBefore) {
-        referenced = true;
-        return { ...line, input_mode: "reference" };
-      }
-      return { ...line, input_mode: i === 0 ? "none" : "last_frame" };
+      const at = before.length + i;
+      if (kinds[at] !== "video") return { ...line, input_mode: "none" };
+      let source = null;
+      for (let j = at - 1; j >= 0 && source === null; j--) source = kinds[j];
+      return {
+        ...line,
+        input_mode: source === "still" ? "reference"
+          : source === "video" ? "last_frame"
+          : "none",
+      };
     });
+  }
+
+  /** How many images a step contributes — an upload step supplies its picks. */
+  function stepImageCount(step) {
+    const info = models.find((m) => m.id === step.model);
+    if (info?.is_upload) return (step.initial_image_ids || []).length;
+    return step.num_outputs || 0;
   }
 
   /**
@@ -391,7 +418,10 @@ export default function WorkflowConfigTab({ onExpand }) {
   function bulkAddSteps(lines, templateIdx) {
     if (lines.length === 0 || lines.some((l) => l.unknownModel)) return;
     setDraft((d) => {
-      const added = lines.map((line) => stepFromTemplate(d.steps[templateIdx], line));
+      // -1 is the built-in defaults, used when no step in the workflow could
+      // stand in as a shot — a kept sheet and a merger, say.
+      const template = templateIdx >= 0 ? d.steps[templateIdx] : DEFAULT_STEP();
+      const added = lines.map((line) => stepFromTemplate(template, line));
 
       // A lone untouched step is the placeholder every new workflow starts
       // with. Keeping it would leave an empty prompt to delete by hand, so the
@@ -843,28 +873,42 @@ export default function WorkflowConfigTab({ onExpand }) {
   // Which step the pasted prompts copy their settings from: the explicit pick
   // while it stands, else the batch being replaced, else the last step that
   // could be a shot.
+  // -1 is the built-in defaults. A workflow can consist of a kept sheet and a
+  // merger, neither of which can stand in for a shot, and a prompt naming its
+  // own model needs a template only for ratio, resolution and outputs.
   const bulkTemplate = (() => {
-    if (bulkCandidates.length === 0) return null;
+    if (bulkCandidates.length === 0 || bulkTemplateIdx === -1) return -1;
     if (bulkTemplateIdx != null && bulkCandidates.includes(bulkTemplateIdx)) return bulkTemplateIdx;
     const lastOfBatch = [...bulkCandidates].reverse().find((i) => draft.steps[i].from_bulk);
     return lastOfBatch ?? bulkCandidates[bulkCandidates.length - 1];
   })();
-  const bulkTemplateModel = bulkTemplate != null ? draft.steps[bulkTemplate].model : null;
+  const bulkTemplateStep = draft && bulkTemplate >= 0 ? draft.steps[bulkTemplate] : DEFAULT_STEP();
+  const bulkTemplateModel = bulkTemplateStep.model;
+  const bulkTemplateName = bulkTemplate >= 0 ? `Step ${bulkTemplate + 1}` : "the defaults";
   const bulkTimed = !!models.find((m) => m.id === bulkTemplateModel)?.supports_duration;
   const bulkRange = bulkTimed ? durationBounds(bulkTemplateModel) : null;
-  const bulkLines = wireBulkLines(parseBulkBlocks(bulkText, bulkTemplateModel));
+  // Steps the batch lands after, which decide what its first shot opens on
+  const bulkPreceding = draft ? draft.steps.slice(0, bulkInsertIndex(draft.steps)) : [];
+  const bulkLines = wireBulkLines(parseBulkBlocks(bulkText, bulkTemplateModel), bulkPreceding);
   const bulkUnknown = [...new Set(bulkLines.map((l) => l.unknownModel).filter(Boolean))];
-  const bulkReferenceCount = bulkLines.filter((l) => l.input_mode === "reference").length
-    ? bulkLines.filter((l) => models.find((m) => m.id === l.model)?.output_extension !== ".mp4").length
-    : 0;
+  // Every still ahead of the referencing shot feeds it — the sheet the paste
+  // brings, plus any that was already sitting in the workflow.
+  const bulkRefAt = bulkLines.findIndex((l) => l.input_mode === "reference");
+  const bulkReferenceCount = bulkRefAt === -1 ? 0 :
+    bulkPreceding
+      .filter((s) => stepKind(s.model) === "still")
+      .reduce((acc, s) => acc + stepImageCount(s), 0)
+    + bulkLines.slice(0, bulkRefAt)
+      .filter((l) => stepKind(l.model) === "still")
+      .reduce((acc) => acc + (bulkTemplateStep.num_outputs || 1), 0);
   // What the batch would add up to, so a minute of video can be planned in the
   // box rather than counted afterwards.
   const bulkSeconds = bulkLines.reduce((acc, l) => {
     const info = models.find((m) => m.id === l.model);
     if (!info?.supports_duration) return acc;
-    return acc + (l.duration ?? draft.steps[bulkTemplate].duration ?? 0);
+    return acc + (l.duration ?? bulkTemplateStep.duration ?? 0);
   }, 0);
-  const bulkTemplateDuration = bulkTemplate != null ? draft.steps[bulkTemplate].duration : 0;
+  const bulkTemplateDuration = bulkTemplateStep.duration;
   const bulkClamped = bulkLines.filter((l) => l.clamped);
   // Steps the last batch left behind, which this one replaces
   const bulkReplacing = draft ? draft.steps.filter((s) => s.from_bulk).length : 0;
@@ -1007,16 +1051,7 @@ export default function WorkflowConfigTab({ onExpand }) {
               </button>
             </div>
 
-            {bulkOpen && bulkTemplate == null && (
-              <div className="wf-bulk-panel">
-                <div className="wf-warning">
-                  No step here can stand in for a shot — a merge or upload step takes no
-                  prompt. Add a step that generates something, set it up, then paste.
-                </div>
-              </div>
-            )}
-
-            {bulkOpen && bulkTemplate != null && (
+            {bulkOpen && (
               <div className="wf-bulk-panel">
                 <div className="wf-bulk-head">
                   <label className="prompt-label" htmlFor="wf-bulk-template">
@@ -1028,6 +1063,7 @@ export default function WorkflowConfigTab({ onExpand }) {
                     value={bulkTemplate}
                     onChange={(e) => setBulkTemplateIdx(parseInt(e.target.value))}
                   >
+                    <option value={-1}>Defaults · {DEFAULT_STEP().model}</option>
                     {bulkCandidates.map((si) => (
                       <option key={si} value={si}>
                         Step {si + 1} · {draft.steps[si].model}
@@ -1037,11 +1073,11 @@ export default function WorkflowConfigTab({ onExpand }) {
                 </div>
                 <p className="wf-hint">
                   Each prompt becomes its own step, taking outputs, ratio and resolution
-                  from Step {bulkTemplate + 1}. Separate prompts with <code>=====</code> as
+                  from {bulkTemplateName}. Separate prompts with <code>=====</code> as
                   on the generate tabs. Start one with a model name, a clip length, or
                   both — <code>nano-banana-2 |</code>, <code>minimax-h3 10 |</code>,{" "}
-                  <code>8 |</code> — and anything left out comes from Step{" "}
-                  {bulkTemplate + 1} ({bulkTemplateModel}
+                  <code>8 |</code>. A prompt naming no model continues the one above it,
+                  and the first falls back to {bulkTemplateName} ({bulkTemplateModel}
                   {bulkTimed ? `, ${bulkTemplateDuration}s` : ""}).
                   {bulkReplacing > 0 && (
                     <>
