@@ -267,6 +267,29 @@ class ImageModel(ABC):
         return False
 
     @property
+    def accepts_video_input(self) -> bool:
+        """
+        Whether this model takes a video where the others take a still. A
+        chained step feeds the previous step's output straight in, so a model
+        that says no is handed that clip's last frame instead of the clip.
+        """
+        return False
+
+    @property
+    def min_duration(self) -> int:
+        """Shortest clip this model will produce, in seconds."""
+        return 1
+
+    @property
+    def max_duration(self) -> int:
+        """
+        Longest clip this model will produce, in seconds. Models that cap the
+        value they send override this so the UI can stop offering a length the
+        request would only have silently shortened.
+        """
+        return 30
+
+    @property
     def supports_lora(self) -> bool:
         """Whether this model accepts LoRA weights and related parameters."""
         return False

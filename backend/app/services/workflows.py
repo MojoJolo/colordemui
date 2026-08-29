@@ -1,5 +1,7 @@
+import os
 import random
 import re
+import threading
 import uuid
 from pathlib import Path
 from typing import List, Optional
@@ -7,8 +9,31 @@ from typing import List, Optional
 from app.models import WorkflowConfig, WorkflowRunRecord, WorkflowStep, WorkflowStepResult, ScheduleUnit
 from app.services import models as model_registry
 from app.services import workflow_storage
+from app.services.ffmpeg_util import last_frame_png, sniff_media_kind
 from app.services.storage import GENERATED_DIR
 from app.utils import utcnow
+
+
+# Runs asked to stop, by run_id. A run is a plain loop in a background thread,
+# so stopping it means letting it notice between steps rather than killing it:
+# the shot in flight is already paid for and is kept.
+_stop_requested: set = set()
+_stop_lock = threading.Lock()
+
+
+def request_stop(run_id: str) -> None:
+    with _stop_lock:
+        _stop_requested.add(run_id)
+
+
+def _stop_wanted(run_id: str) -> bool:
+    with _stop_lock:
+        return run_id in _stop_requested
+
+
+def _clear_stop(run_id: str) -> None:
+    with _stop_lock:
+        _stop_requested.discard(run_id)
 
 
 def _filenames_by_ids(image_ids: List[str]) -> List[str]:
@@ -197,6 +222,9 @@ def _build_step(s) -> WorkflowStep:
         save_audio=getattr(s, "save_audio", True),
         initial_image_ids=getattr(s, "initial_image_ids", []),
         source_step_index=getattr(s, "source_step_index", None),
+        input_mode=getattr(s, "input_mode", "last_frame"),
+        reference_source_steps=getattr(s, "reference_source_steps", []),
+        from_bulk=getattr(s, "from_bulk", False),
         merge_source_steps=getattr(s, "merge_source_steps", []),
         merge_items=getattr(s, "merge_items", []),
         language=getattr(s, "language", "english"),
@@ -282,6 +310,99 @@ def _resolve_ref_bytes(
         if step_outputs.get(s):
             return step_outputs[s]
     return []
+
+
+def public_base_url() -> str:
+    """
+    Where this app is reachable from the outside, with no trailing slash.
+
+    Reference images are handed to the model as URLs rather than uploaded, so
+    the generating service fetches them from here. A run happens on a schedule
+    or in a background task with no request to read a host from, which is why
+    this is configuration and not something that can be inferred.
+    """
+    return os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+
+def _reference_urls(
+    step: WorkflowStep,
+    index: int,
+    wf: WorkflowConfig,
+    step_files: dict,
+) -> List[str]:
+    """
+    Public URLs for the images a step is referencing.
+
+    The default is every earlier step that produced stills — a character sheet
+    generated at the top of the workflow — and an explicit pick narrows that.
+    A URL is only useful if the model can actually fetch it, so a missing base
+    URL stops the run here rather than sending links to a host only this
+    machine can resolve.
+    """
+    base = public_base_url()
+    if not base:
+        raise ValueError(
+            f"Step {index + 1} passes reference images, which are fetched by URL, "
+            "but PUBLIC_BASE_URL is not set. Set it to the address this app is "
+            "reachable at (e.g. http://203.0.113.10:8000) and run again."
+        )
+
+    sources = [s for s in step.reference_source_steps if 0 <= s < index]
+    if not sources:
+        sources = [s for s in range(index) if _produces_still(wf.steps[s])]
+    if not sources:
+        raise ValueError(
+            f"Step {index + 1} takes reference images but no earlier step produces one. "
+            "Add an image step before it, or set the step to open on the previous clip."
+        )
+
+    urls = []
+    for src in sources:
+        for filename in step_files.get(src, []):
+            urls.append(f"{base}/generated/{filename}")
+    if not urls:
+        picked = ", ".join(f"Step {s + 1}" for s in sources)
+        raise ValueError(
+            f"Step {index + 1} references {picked}, but no image came out of "
+            f"{'that step' if len(sources) == 1 else 'those steps'}."
+        )
+    return urls
+
+
+def _produces_still(step: WorkflowStep) -> bool:
+    try:
+        model = model_registry.get_model(step.model)
+        return not model.is_text and model.output_extension != ".mp4"
+    except ValueError:
+        return False
+
+
+def _as_first_frames(ref_bytes: List[bytes], model, index: int) -> List[bytes]:
+    """
+    Swap each chained clip for its final frame.
+
+    A video step's output is a clip, but a first-frame input is a still, so
+    handing one step's output to the next needs the join made explicit: the
+    last frame of the shot before becomes the first frame of the shot after.
+    Models that read a clip directly, and stills that arrive already still,
+    pass through untouched.
+    """
+    if not ref_bytes or model.accepts_video_input or not model.accepts_image:
+        return ref_bytes
+
+    frames = []
+    for data in ref_bytes:
+        if sniff_media_kind(data) != "video":
+            frames.append(data)
+            continue
+        try:
+            frames.append(last_frame_png(data))
+        except Exception as exc:
+            raise ValueError(
+                f"Step {index + 1} continues from the previous clip, but its "
+                f"last frame could not be read: {exc}"
+            ) from exc
+    return frames
 
 
 def _produces_video(step: WorkflowStep) -> bool:
@@ -383,8 +504,10 @@ def _collect_merge_items(
     return items
 
 
-def _generate_kwargs(model, step: WorkflowStep) -> dict:
+def _generate_kwargs(model, step: WorkflowStep, reference_urls: Optional[List[str]] = None) -> dict:
     kwargs = {}
+    if reference_urls and model.supports_reference_urls:
+        kwargs["reference_image_urls"] = reference_urls
     if model.supports_duration:
         kwargs.update(duration=step.duration, save_audio=step.save_audio)
     if model.supports_aspect_ratio:
@@ -412,6 +535,7 @@ def _processor_kwargs(model, step: WorkflowStep) -> dict:
 def run_workflow(workflow_id: str, run_id: str) -> None:
     wf = workflow_storage.load_workflow(workflow_id)
     if not wf:
+        _clear_stop(run_id)
         print(f"[workflow {workflow_id[:8]}] not found, aborting run")
         return
 
@@ -429,11 +553,25 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
     # handed to a later step as a reference image.
     step_outputs: dict[int, List[bytes]] = {}
     step_texts: dict[int, str] = {}
+    # step_files[i] holds the paths step i wrote, relative to GENERATED_DIR —
+    # what a reference URL is built from, since the model fetches rather than
+    # receives those images.
+    step_files: dict[int, List[str]] = {}
 
     # Pick one value per slot for the entire run so all steps share the same context
     picked_slots = {slot: [random.choice(words)] for slot, words in wf.slot_lists.items() if words}
 
     for i, step in enumerate(wf.steps):
+        # Checked between steps, so a stop lands after the shot in flight
+        # finishes rather than throwing that render away.
+        if _stop_wanted(run_id):
+            run.status = "stopped"
+            run.finished_at = utcnow()
+            workflow_storage.save_run(run)
+            _clear_stop(run_id)
+            print(f"[workflow {workflow_id[:8]}] run {run_id[:8]} stopped before step {i + 1}")
+            return
+
         model = model_registry.get_model(step.model)
         output_dir = GENERATED_DIR / wf.slug
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -476,20 +614,38 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
                         model.process(data, prompt, **_processor_kwargs(model, step))
                     )
             else:
+                # A first frame and reference images are alternatives — h3
+                # refuses both at once — so the step's mode picks exactly one,
+                # and "none" means the source is there but unused.
+                reference_urls = None
+                if step.input_mode == "reference":
+                    reference_urls = _reference_urls(step, i, wf, step_files)
+                    ref_bytes = []
+                elif step.input_mode == "last_frame":
+                    ref_bytes = _as_first_frames(ref_bytes, model, i)
+                else:
+                    # "none" means none, whatever the model would accept. A
+                    # character sheet is several independent stills, and
+                    # generating the second from the first would carry one
+                    # character's face into another's portrait.
+                    ref_bytes = []
+
                 for j in range(step.num_outputs):
                     if model.is_multi_reference:
-                        ref_images = ref_bytes
-                        if not ref_images:
+                        # Taking references is not the same as needing them:
+                        # nano-banana-2 with none is plain text-to-image, which
+                        # is what opens a workflow that starts on a still.
+                        if not ref_bytes and model.requires_image:
                             raise ValueError(
                                 f"Step {i + 1} uses '{step.model}' which requires reference images, "
                                 "but none are available from the source step or configured initial images."
                             )
-                        img_bytes = model.generate_one(prompt, ref_images, seed=None, aspect_ratio=step.aspect_ratio)
+                        img_bytes = model.generate_one(prompt, ref_bytes, seed=None, aspect_ratio=step.aspect_ratio)
                     elif ref_bytes and model.accepts_image:
                         ref = ref_bytes[j % len(ref_bytes)]
-                        img_bytes = model.generate(prompt, ref, **_generate_kwargs(model, step))
+                        img_bytes = model.generate(prompt, ref, **_generate_kwargs(model, step, reference_urls))
                     else:
-                        img_bytes = model.generate(prompt, None, **_generate_kwargs(model, step))
+                        img_bytes = model.generate(prompt, None, **_generate_kwargs(model, step, reference_urls))
                     produced_bytes.append(img_bytes)
 
             if model.is_upload:
@@ -504,6 +660,7 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
 
             step_result.image_filenames = filenames
             step_result.status = "done"
+            step_files[i] = filenames
             if model.is_text:
                 step_texts[i] = produced_bytes[0].decode("utf-8", errors="replace")
             else:
@@ -519,6 +676,7 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
             run.status = "failed"
             run.finished_at = utcnow()
             workflow_storage.save_run(run)
+            _clear_stop(run_id)
             print(f"[workflow {workflow_id[:8]}] step {i} failed: {exc}")
             return
 
@@ -528,6 +686,9 @@ def run_workflow(workflow_id: str, run_id: str) -> None:
     run.status = "done"
     run.finished_at = utcnow()
     workflow_storage.save_run(run)
+    # A stop that arrived during the last step changed nothing — the run had
+    # already finished the work — but the request must not outlive it.
+    _clear_stop(run_id)
     print(f"[workflow {workflow_id[:8]}] run {run_id[:8]} complete")
 
 

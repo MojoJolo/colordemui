@@ -55,6 +55,14 @@ class MiniMaxH3Model(ImageModel):
         return True
 
     @property
+    def min_duration(self) -> int:
+        return MIN_DURATION
+
+    @property
+    def max_duration(self) -> int:
+        return MAX_DURATION
+
+    @property
     def supports_aspect_ratio(self) -> bool:
         return True
 

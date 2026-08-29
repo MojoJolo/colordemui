@@ -14,6 +14,7 @@ export default defineConfig({
       "/images": apiProxyTarget,
       "/uploads": apiProxyTarget,
       "/models": apiProxyTarget,
+      "/config": apiProxyTarget,
       "/generated": apiProxyTarget,
       "/health": apiProxyTarget,
       "/workflows": apiProxyTarget,

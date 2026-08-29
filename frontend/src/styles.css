@@ -1783,6 +1783,111 @@ body {
   align-self: flex-start;
 }
 
+.wf-bulk-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem;
+  border: 1px dashed #c8cdd6;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.wf-bulk-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.wf-bulk-select {
+  width: auto;
+  min-width: 220px;
+}
+
+.wf-bulk-textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
+.wf-bulk-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  list-style: none;
+  counter-reset: wf-bulk;
+  background: #ffffff;
+  border: 1px solid #e2e5ea;
+  border-radius: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.wf-bulk-preview-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: #4b5563;
+  counter-increment: wf-bulk;
+}
+
+.wf-bulk-preview-item::before {
+  content: counter(wf-bulk);
+  flex: 0 0 1.4rem;
+  text-align: right;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+}
+
+.wf-bulk-preview-model {
+  flex: 0 0 7.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  color: #1a1d23;
+}
+
+.wf-bulk-preview-wiring {
+  flex: 0 0 6.5rem;
+  color: #6b7280;
+  font-size: 0.76rem;
+}
+
+.wf-bulk-preview-dur {
+  flex: 0 0 2.6rem;
+  text-align: right;
+  font-family: monospace;
+  color: #1a1d23;
+  font-variant-numeric: tabular-nums;
+}
+
+.wf-bulk-preview-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-field-chain {
+  align-self: flex-end;
+  padding-bottom: 0.4rem;
+}
+
+.wf-hint-warn {
+  color: #b45309;
+}
+
+.wf-bulk-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .wf-actions {
   display: flex;
   gap: 0.75rem;
@@ -1849,6 +1954,15 @@ body {
 .wf-run-badge.failed {
   background: #fee2e2;
   color: #dc2626;
+}
+
+.wf-run-badge.stopped {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.wf-run-stop {
+  margin-left: auto;
 }
 
 .wf-run-time {

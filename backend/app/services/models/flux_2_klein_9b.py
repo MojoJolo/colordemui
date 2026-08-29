@@ -27,6 +27,10 @@ class FluxKlein9bModel(ImageModel):
         return True
 
     @property
+    def requires_image(self) -> bool:
+        return True  # generate_one() rejects an empty reference list
+
+    @property
     def is_multi_reference(self) -> bool:
         return True
 

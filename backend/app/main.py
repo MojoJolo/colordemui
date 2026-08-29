@@ -108,6 +108,17 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/config")
+def get_config():
+    """
+    Settings the UI has to know about to warn before a run rather than after.
+    Reference images are fetched by URL, so without a public base URL a step
+    that uses them cannot work — and that is worth saying while it is being
+    configured.
+    """
+    return {"public_base_url": workflow_service.public_base_url()}
+
+
 @app.get("/models")
 def list_models():
     return model_registry.list_models()
@@ -283,6 +294,9 @@ def _wf_to_response(wf) -> WorkflowResponse:
             save_audio=s.save_audio,
             initial_image_ids=s.initial_image_ids,
             source_step_index=s.source_step_index,
+            input_mode=s.input_mode,
+            reference_source_steps=s.reference_source_steps,
+            from_bulk=s.from_bulk,
             merge_source_steps=s.merge_source_steps,
             merge_items=s.merge_items,
             language=s.language,
@@ -400,6 +414,25 @@ def get_workflow_run(workflow_id: str, run_id: str):
     run = workflow_storage.load_run(wf.slug, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
+    return _run_to_response(run, wf)
+
+
+@app.post("/workflows/{workflow_id}/runs/{run_id}/stop", response_model=WorkflowRunResponse)
+def stop_workflow_run(workflow_id: str, run_id: str):
+    """
+    Ask a run to stop after the step it is on. The step in flight has already
+    been paid for at Replicate, so it finishes and is kept; nothing after it
+    starts.
+    """
+    wf = workflow_service.get_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    run = workflow_storage.load_run(wf.slug, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status != "running":
+        raise HTTPException(status_code=409, detail=f"Run is already {run.status}")
+    workflow_service.request_stop(run_id)
     return _run_to_response(run, wf)
 
 
